@@ -3,7 +3,7 @@
 Automates post-processing for OBS recordings by date, without re-encoding the video stream.
 
 ## What It Does
-- Collects `*$DATE*.mkv` from `~/Videos/OBS` in stable sorted order.
+- Collects `*$DATE*.mkv` from `~/Videos/OBS` in sorted order.
 - Concatenates segments with stream copy into `merged_YYYY-MM-DD.mkv`.
 - Processes audio once for the full session into `processed_audio_YYYY-MM-DD.m4a`.
 - Remuxes final MP4 as:

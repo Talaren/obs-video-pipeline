@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Lint and format-check staged shell scripts before commit.
 mapfile -t staged_shell_files < <(
-  git diff --cached --name-only --diff-filter=ACMR | grep -E '\.sh$' || true
+  git diff --cached --name-only --diff-filter=ACMR | grep '\.sh$' || true
 )
 
 if [ ${#staged_shell_files[@]} -eq 0 ]; then

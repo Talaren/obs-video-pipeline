@@ -42,3 +42,14 @@
 - Video handling: OBS video is not re-encoded; pipeline does concat/copy to `merged_YYYY-MM-DD.mkv`, then final remux with `-c:v copy -c:a copy -movflags +faststart`.
 - Audio processing: runs once on merged session. For 3+ streams, full Discord/Foundry/Mic mix is used; for 1-2 streams, fallback filters are applied automatically. Final mix targets around -16 LUFS with -2 dBTP.
 - Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`).
+
+## Git Safety Baseline
+- Branch: `main` is protected on GitHub (`Talaren/obs-video-pipeline`).
+- Branch protection rules: PR review required (1 approval), stale reviews dismissed, admin enforcement enabled, force-push disabled, branch deletion disabled, conversation resolution required.
+- Commit signing: SSH signing is enabled (`commit.gpgsign=true`, `gpg.format=ssh`), using the configured `user.signingkey`.
+- Local hook policy: configure locally with `git config core.hooksPath .githooks`.
+- Pre-commit hook: `.githooks/pre-commit` (when enabled via `core.hooksPath`) runs `shellcheck` and `shfmt -d -i 2 -ci` on staged `*.sh` files and blocks non-compliant commits.
+- Hook implementation note: staged file filtering uses POSIX tools (`grep`), so no `rg` dependency is required.
+- Required local tools for commits: `shellcheck`, `shfmt`.
+- Privilege model: no unattended root actions; package/system changes require manual `sudo` approval.
+- Secret model: GitHub/Codex API operations require explicit token/app approval.

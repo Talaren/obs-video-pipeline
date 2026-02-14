@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Lint and format-check staged shell scripts before commit.
+mapfile -t staged_shell_files < <(
+  git diff --cached --name-only --diff-filter=ACMR | rg '\.sh$' || true
+)
+
+if [ ${#staged_shell_files[@]} -eq 0 ]; then
+  exit 0
+fi
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "pre-commit: shellcheck ist nicht installiert. Bitte installieren und erneut committen." >&2
+  exit 1
+fi
+
+if ! command -v shfmt >/dev/null 2>&1; then
+  echo "pre-commit: shfmt ist nicht installiert. Bitte installieren und erneut committen." >&2
+  exit 1
+fi
+
+echo "pre-commit: running shellcheck"
+shellcheck "${staged_shell_files[@]}"
+
+echo "pre-commit: running shfmt check"
+shfmt -d -i 2 -ci "${staged_shell_files[@]}"

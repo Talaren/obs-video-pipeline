@@ -1,0 +1,15 @@
+# Large/local recording assets
+OBS/
+
+# Pipeline artifacts/logs (if moved or created at repo root)
+*.log
+filelist*.txt
+merged_*.mkv
+processed_audio_*.m4a
+*_piece.mp4
+
+# Python virtual envs / caches
+venv/
+.venv/
+__pycache__/
+*.pyc

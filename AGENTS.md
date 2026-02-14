@@ -47,8 +47,8 @@
 - Branch: `main` is protected on GitHub (`Talaren/obs-video-pipeline`).
 - Branch protection rules: PR review required (1 approval), stale reviews dismissed, admin enforcement enabled, force-push disabled, branch deletion disabled, conversation resolution required.
 - Commit signing: SSH signing is enabled (`commit.gpgsign=true`, `gpg.format=ssh`), using the configured `user.signingkey`.
-- Local hook policy: repository uses `core.hooksPath=.githooks`.
-- Pre-commit hook: `.githooks/pre-commit` runs `shellcheck` and `shfmt -d -i 2 -ci` on staged `*.sh` files and blocks non-compliant commits.
+- Local hook policy: configure locally with `git config core.hooksPath .githooks`.
+- Pre-commit hook: `.githooks/pre-commit` (when enabled via `core.hooksPath`) runs `shellcheck` and `shfmt -d -i 2 -ci` on staged `*.sh` files and blocks non-compliant commits.
 - Hook implementation note: staged file filtering uses POSIX tools (`grep`), so no `rg` dependency is required.
 - Required local tools for commits: `shellcheck`, `shfmt`.
 - Privilege model: no unattended root actions; package/system changes require manual `sudo` approval.

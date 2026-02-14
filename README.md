@@ -50,7 +50,8 @@ Default stage order:
 ## Quality & Security Guardrails
 - Commit signing via SSH key is enabled.
 - `main` branch is protected on GitHub (review required, no force-push/delete).
-- Pre-commit hook at `.githooks/pre-commit` enforces:
+- Pre-commit hook at `.githooks/pre-commit` (when enabled with `git config core.hooksPath .githooks`) enforces:
   - `shellcheck`
   - `shfmt -d -i 2 -ci`
-
+- Enable hook path locally:
+  - `git config core.hooksPath .githooks`

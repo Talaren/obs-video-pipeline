@@ -49,6 +49,7 @@
 - Commit signing: SSH signing is enabled (`commit.gpgsign=true`, `gpg.format=ssh`), using the configured `user.signingkey`.
 - Local hook policy: repository uses `core.hooksPath=.githooks`.
 - Pre-commit hook: `.githooks/pre-commit` runs `shellcheck` and `shfmt -d -i 2 -ci` on staged `*.sh` files and blocks non-compliant commits.
+- Hook implementation note: staged file filtering uses POSIX tools (`grep`), so no `rg` dependency is required.
 - Required local tools for commits: `shellcheck`, `shfmt`.
 - Privilege model: no unattended root actions; package/system changes require manual `sudo` approval.
 - Secret model: GitHub/Codex API operations require explicit token/app approval.

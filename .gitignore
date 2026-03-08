@@ -11,5 +11,6 @@ processed_audio_*.m4a
 # Python virtual envs / caches
 venv/
 .venv/
+.venv-*/
 __pycache__/
 *.pyc

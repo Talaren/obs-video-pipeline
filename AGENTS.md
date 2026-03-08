@@ -13,8 +13,9 @@
   - Final: `DSA5 mit Marth DD.MM.YYYY final.mp4`
 
 ## Build, Test, and Development Commands
-- Run pipeline (default stages: concat,audio,video,upload,clean): `./process_videos.sh 2025-08-28`
+- Run pipeline (default stages: concat,audio,video,clean): `./process_videos.sh 2025-08-28`
 - Select stages: `./process_videos.sh -e concat,audio,video,clean 2025-08-28`
+- Include upload explicitly: `./process_videos.sh -e concat,audio,video,upload,clean 2025-08-28`
 - Audio only (auto-concat if merged file is missing): `./process_videos.sh -e audio -m balanced 2025-08-28`
 - Video only (auto-runs audio when processed audio is missing): `./process_videos.sh -e video 2025-08-28`
 - Upload only (requires final MP4 or auto-builds missing prerequisites): `./process_videos.sh -e upload 2025-08-28`
@@ -66,10 +67,11 @@
   - Privacy is `unlisted`.
   - Requires OAuth desktop client secrets at `~/.config/yt-upload/client_secrets.json`.
   - Token is cached at `~/.config/yt-upload/token.json`.
+  - Base scope is `youtube.upload`; playlist insertion requires an additional YouTube scope.
   - `YOUTUBE_UPLOAD_TAGS` sets comma-separated tags.
   - `YOUTUBE_UPLOAD_PLAYLIST_ID` adds uploaded video to a playlist.
   - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets insertion index in that playlist.
-  - Extra uploader args can be passed via `YOUTUBE_UPLOAD_EXTRA_ARGS`.
+  - Extra uploader args are passed via newline-separated `YOUTUBE_UPLOAD_EXTRA_ARGS`.
 - Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`).
 
 ## Git Safety Baseline

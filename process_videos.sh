@@ -42,7 +42,7 @@ Optionen:
   -s             Statt Benachrichtigung am Ende Shutdown ausfuhren (setzt NOTIFY=false)
   -e STAGES      Auszufuhrende Schritte, kommagetrennt:
                  concat,audio,video,upload,clean
-                 (Wenn -e nicht gesetzt ist: concat,audio,video,upload,clean)
+                 (Wenn -e nicht gesetzt ist: concat,audio,video,clean)
   -T THREADS     Anzahl Threads pro ffmpeg-Prozess (setzt -threads bei ffmpeg-Aufrufen)
   -m PROFILE     Audio-Mix-Profil: balanced (Default) oder voice-priority
   -h             Hilfe
@@ -55,8 +55,8 @@ Audio-Annahme (ohne Fallback):
 YouTube-Upload:
   Standard-Uploadclient: ./yt_upload.sh (lokaler API-Client)
   Fur den ersten Upload werden OAuth Client-Secrets benotigt.
-  Zusatzparameter ubergeben via YOUTUBE_UPLOAD_EXTRA_ARGS, z. B.:
-  --client-secrets ~/.config/yt-upload/client_secrets.json --token-file ~/.config/yt-upload/token.json
+  Zusatzparameter via YOUTUBE_UPLOAD_EXTRA_ARGS (newline-separiert), z. B.:
+  $'--client-secrets\n~/.config/yt-upload/client_secrets.json\n--token-file\n~/.config/yt-upload/token.json'
   Komfort-Variablen:
   YOUTUBE_UPLOAD_TAGS="dsa5,pen-and-paper"
   YOUTUBE_UPLOAD_PLAYLIST_ID="PLxxxx..."
@@ -129,7 +129,7 @@ exec > >(tee -i "$LOG_FILE") 2>&1
 log_msg "Starte Prozess fur Datum: $DATE"
 
 if [ -z "$STAGES" ]; then
-  STAGES="concat,audio,video,upload,clean"
+  STAGES="concat,audio,video,clean"
 fi
 
 run_concat=false
@@ -421,9 +421,11 @@ run_upload_stage() {
   title="DSA5 mit Marth $FORMATTED_DATE"
 
   local upload_extra_args=()
-  if [ -n "$YOUTUBE_UPLOAD_EXTRA_ARGS" ]; then
-    # shellcheck disable=SC2206
-    upload_extra_args=($YOUTUBE_UPLOAD_EXTRA_ARGS)
+  if [ -n "${YOUTUBE_UPLOAD_EXTRA_ARGS-}" ]; then
+    while IFS= read -r arg; do
+      [ -n "$arg" ] || continue
+      upload_extra_args+=("$arg")
+    done <<<"$YOUTUBE_UPLOAD_EXTRA_ARGS"
   fi
 
   local upload_optional_args=()

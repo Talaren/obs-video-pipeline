@@ -95,14 +95,15 @@ Notes:
 Default order if `-e` is not provided:
 
 ```text
-concat,audio,video,upload,clean
+concat,audio,video,clean
 ```
 
 ## Usage
 
 - Full default pipeline:
   - `./process_videos.sh 2026-03-06`
-  - Requires configured OAuth client secrets for the `upload` stage.
+- Full pipeline including upload:
+  - `./process_videos.sh -e concat,audio,video,upload,clean 2026-03-06`
 - Build locally without upload:
   - `./process_videos.sh -e concat,audio,video,clean 2026-03-06`
 - Audio only:
@@ -153,10 +154,10 @@ On first upload, OAuth login runs and token is stored at:
 ./process_videos.sh -e upload 2026-03-06
 ```
 
-Optional extra uploader args (passed through to `yt_upload.py`):
+Optional extra uploader args (passed through to `yt_upload.py`) as newline-separated items:
 
 ```bash
-export YOUTUBE_UPLOAD_EXTRA_ARGS="--client-secrets ~/.config/yt-upload/client_secrets.json --token-file ~/.config/yt-upload/token.json --tags dsa5,pen-and-paper"
+export YOUTUBE_UPLOAD_EXTRA_ARGS=$'--client-secrets\n~/.config/yt-upload/client_secrets.json\n--token-file\n~/.config/yt-upload/token.json\n--tags\ndsa5,pen-and-paper'
 ```
 
 Convenience env vars for tags and playlist:
@@ -172,6 +173,11 @@ Then run upload:
 ```bash
 ./process_videos.sh -e upload 2026-03-06
 ```
+
+Scope behavior:
+
+- Upload without playlist requests only `youtube.upload`.
+- If `--playlist-id` / `YOUTUBE_UPLOAD_PLAYLIST_ID` is used, uploader requests an additional YouTube scope and may ask for OAuth consent again.
 
 ## Inputs and Outputs
 

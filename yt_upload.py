@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import List
 
@@ -16,10 +18,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube",
-]
+UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+PLAYLIST_SCOPE = "https://www.googleapis.com/auth/youtube"
 DEFAULT_CLIENT_SECRETS = Path.home() / ".config" / "yt-upload" / "client_secrets.json"
 DEFAULT_TOKEN_FILE = Path.home() / ".config" / "yt-upload" / "token.json"
 VALID_PRIVACY = {"private", "public", "unlisted"}
@@ -66,24 +66,44 @@ def parse_args() -> argparse.Namespace:
   return parser.parse_args()
 
 
-def load_credentials(client_secrets_path: Path, token_path: Path) -> Credentials:
+def required_scopes(playlist_id: str) -> List[str]:
+  scopes = [UPLOAD_SCOPE]
+  if playlist_id.strip():
+    scopes.append(PLAYLIST_SCOPE)
+  return scopes
+
+
+def write_token_file(token_path: Path, token_json: str) -> None:
+  token_path.parent.mkdir(parents=True, exist_ok=True)
+
+  tmp_fd, tmp_name = tempfile.mkstemp(prefix=f".{token_path.name}.", dir=str(token_path.parent))
+  try:
+    with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+      tmp_file.write(token_json)
+    os.chmod(tmp_name, 0o600)
+    os.replace(tmp_name, token_path)
+  finally:
+    if os.path.exists(tmp_name):
+      os.remove(tmp_name)
+
+
+def load_credentials(client_secrets_path: Path, token_path: Path, scopes: List[str]) -> Credentials:
   creds = None
   if token_path.exists():
-    creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    creds = Credentials.from_authorized_user_file(str(token_path), scopes)
 
   if creds and creds.expired and creds.refresh_token:
     creds.refresh(Request())
 
   # Force a new OAuth flow when scopes are missing (e.g. playlist support added later).
-  if not creds or not creds.valid or not creds.has_scopes(SCOPES):
-    flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets_path), SCOPES)
+  if not creds or not creds.valid or not creds.has_scopes(scopes):
+    flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets_path), scopes)
     try:
       creds = flow.run_local_server(port=0, open_browser=True)
     except Exception:
       creds = flow.run_console()
 
-  token_path.parent.mkdir(parents=True, exist_ok=True)
-  token_path.write_text(creds.to_json(), encoding="utf-8")
+  write_token_file(token_path, creds.to_json())
   return creds
 
 
@@ -125,7 +145,8 @@ def upload_video(args: argparse.Namespace) -> tuple[str, str | None]:
     )
 
   token_path = Path(args.token_file).expanduser()
-  creds = load_credentials(client_secrets_path, token_path)
+  scopes = required_scopes(args.playlist_id)
+  creds = load_credentials(client_secrets_path, token_path, scopes)
   youtube = build("youtube", "v3", credentials=creds)
 
   body = {

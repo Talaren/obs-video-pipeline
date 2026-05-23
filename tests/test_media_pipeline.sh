@@ -55,6 +55,14 @@ require_cmd() {
   fi
 }
 
+require_ffmpeg_encoder() {
+  local encoder="$1"
+
+  if ! ffmpeg -hide_banner -encoders 2>/dev/null | awk '{ print $2 }' | grep -Fxq "$encoder"; then
+    fail "required ffmpeg encoder not found: $encoder"
+  fi
+}
+
 new_home() {
   local dir
 
@@ -76,8 +84,13 @@ run_pipeline() {
 
 audio_stream_count() {
   local media_file="$1"
+  local count
 
-  ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$media_file" | wc -l
+  if ! count=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$media_file" | awk 'END { print NR }'); then
+    fail "ffprobe failed while counting audio streams in $media_file"
+  fi
+
+  printf '%s\n' "$count"
 }
 
 create_three_stream_segment() {
@@ -162,6 +175,8 @@ test_audio_stage_rejects_non_three_stream_layout() {
 main() {
   require_cmd ffmpeg
   require_cmd ffprobe
+  require_ffmpeg_encoder libopus
+  require_ffmpeg_encoder libx264
 
   test_concat_preserves_three_audio_streams
   test_audio_and_video_stages_create_outputs

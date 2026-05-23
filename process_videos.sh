@@ -137,32 +137,15 @@ if [ -z "$STAGES" ]; then
   STAGES="concat,audio,video,clean"
 fi
 
-run_concat=false
-run_audio=false
-run_video=false
-run_upload=false
-run_clean=false
-
+selected_stages=()
 IFS=',' read -ra steps <<<"$STAGES"
 for step in "${steps[@]}"; do
   normalized_step="${step,,}"
   normalized_step="${normalized_step//[[:space:]]/}"
 
   case "$normalized_step" in
-    concat)
-      run_concat=true
-      ;;
-    audio)
-      run_audio=true
-      ;;
-    video)
-      run_video=true
-      ;;
-    upload)
-      run_upload=true
-      ;;
-    clean)
-      run_clean=true
+    concat | audio | video | upload | clean)
+      selected_stages+=("$normalized_step")
       ;;
     *)
       log_msg "Unbekannter Schritt: $step"
@@ -170,6 +153,41 @@ for step in "${steps[@]}"; do
       ;;
   esac
 done
+
+stage_enabled() {
+  local wanted="$1"
+  local selected_stage
+
+  for selected_stage in "${selected_stages[@]}"; do
+    if [ "$selected_stage" = "$wanted" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_concat=false
+run_audio=false
+run_video=false
+run_upload=false
+run_clean=false
+
+if stage_enabled concat; then
+  run_concat=true
+fi
+if stage_enabled audio; then
+  run_audio=true
+fi
+if stage_enabled video; then
+  run_video=true
+fi
+if stage_enabled upload; then
+  run_upload=true
+fi
+if stage_enabled clean; then
+  run_clean=true
+fi
 
 if [ "$CLEANUP" = false ]; then
   run_clean=false

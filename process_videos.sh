@@ -211,6 +211,10 @@ fi
 
 thread_option=()
 if [ -n "$FFMPEG_THREADS" ]; then
+  if [[ ! "$FFMPEG_THREADS" =~ ^[0-9]+$ ]]; then
+    log_msg "Fehler: -T erwartet eine nicht-negative Ganzzahl (erhalten: $FFMPEG_THREADS)."
+    exit 1
+  fi
   thread_option=(-threads "$FFMPEG_THREADS")
 fi
 

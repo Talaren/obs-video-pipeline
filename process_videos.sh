@@ -109,6 +109,11 @@ if [ $# -lt 1 ]; then
 fi
 
 DATE="$1"
+if [[ ! "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "Ungultiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  exit 1
+fi
+
 if ! FORMATTED_DATE=$(date -d "$DATE" +"%d.%m.%Y" 2>/dev/null); then
   echo "Ungultiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
   exit 1

@@ -455,7 +455,11 @@ if [ "$SHUTDOWN" = true ]; then
   log_msg "Prozess abgeschlossen, fahre System herunter..."
   systemctl poweroff
 elif [ "$NOTIFY" = true ]; then
-  notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fuer $DATE sind abgeschlossen."
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fuer $DATE sind abgeschlossen."
+  else
+    log_msg "Verarbeitung abgeschlossen, aber 'notify-send' ist nicht installiert. Keine Benachrichtigung gesendet."
+  fi
 else
   log_msg "Verarbeitung abgeschlossen ohne Benachrichtigung/Shutdown."
 fi

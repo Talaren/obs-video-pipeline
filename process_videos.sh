@@ -119,6 +119,11 @@ if [[ ! "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   exit 1
 fi
 
+if ! NORMALIZED_DATE=$(date -d "$DATE" +"%Y-%m-%d" 2>/dev/null) || [ "$NORMALIZED_DATE" != "$DATE" ]; then
+  echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  exit 1
+fi
+
 if ! FORMATTED_DATE=$(date -d "$DATE" +"%d.%m.%Y" 2>/dev/null); then
   echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
   exit 1

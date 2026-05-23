@@ -5,14 +5,18 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PROCESS_SCRIPT="$REPO_DIR/process_videos.sh"
 
-TEST_TMP=""
+TEST_TMP_DIRS=()
 LAST_OUTPUT=""
 LAST_STATUS=0
 
 cleanup() {
-  if [ -n "$TEST_TMP" ] && [ -d "$TEST_TMP" ]; then
-    rm -rf "$TEST_TMP"
-  fi
+  local dir
+
+  for dir in "${TEST_TMP_DIRS[@]}"; do
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      rm -rf "$dir"
+    fi
+  done
 }
 trap cleanup EXIT
 
@@ -54,10 +58,20 @@ assert_not_contains() {
   fi
 }
 
+new_temp_dir() {
+  local dir
+
+  dir="$(mktemp -d)"
+  TEST_TMP_DIRS+=("$dir")
+  printf '%s\n' "$dir"
+}
+
 new_home() {
-  TEST_TMP="$(mktemp -d)"
-  mkdir -p "$TEST_TMP/Videos/OBS/final"
-  printf '%s\n' "$TEST_TMP"
+  local dir
+
+  dir="$(new_temp_dir)"
+  mkdir -p "$dir/Videos/OBS/final"
+  printf '%s\n' "$dir"
 }
 
 run_pipeline() {
@@ -164,8 +178,7 @@ test_dry_run_finish_actions() {
 
 test_dry_run_does_not_write_output_dir() {
   local test_home
-  test_home="$(mktemp -d)"
-  TEST_TMP="$test_home"
+  test_home="$(new_temp_dir)"
 
   run_pipeline "$test_home" -d -e upload 2099-01-01
   assert_eq 0 "$LAST_STATUS" "dry-run should succeed without pre-existing output directory"

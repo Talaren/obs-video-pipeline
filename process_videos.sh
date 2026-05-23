@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 CLEANUP=true
+DRY_RUN=false
 NOTIFY=false
 SHUTDOWN=false
 STAGES=""
@@ -38,6 +39,7 @@ Verwendung: ./process_videos.sh [Optionen] DATUM
 
 Optionen:
   -c             Kein Aufraeumen am Ende (Standard: Aufraeumen aktiv)
+  -d             Dry-Run: geplante Schritte anzeigen, nichts ausfuehren
   -n             Benachrichtigung am Ende anzeigen
   -s             Statt Benachrichtigung am Ende Shutdown ausfuhren (setzt NOTIFY=false)
   -e STAGES      Auszufuhrende Schritte, kommagetrennt:
@@ -64,10 +66,13 @@ YouTube-Upload:
 EOF
 }
 
-while getopts ":cnhse:T:m:h" opt; do
+while getopts ":cdnhe:T:m:s" opt; do
   case "$opt" in
     c)
       CLEANUP=false
+      ;;
+    d)
+      DRY_RUN=true
       ;;
     n)
       NOTIFY=true
@@ -121,17 +126,19 @@ fi
 
 VIDEO_DIR="$HOME/Videos/OBS"
 OUTPUT_DIR="$HOME/Videos/OBS/final"
-mkdir -p "$OUTPUT_DIR"
 
 MERGED_FILE="$OUTPUT_DIR/merged_${DATE}.mkv"
 PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
 FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 
-LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
-exec > >(tee -i "$LOG_FILE") 2>&1
+if [ "$DRY_RUN" = false ]; then
+  mkdir -p "$OUTPUT_DIR"
+  LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
+  exec > >(tee -i "$LOG_FILE") 2>&1
 
-log_msg "Starte Prozess fuer Datum: $DATE"
+  log_msg "Starte Prozess fuer Datum: $DATE"
+fi
 
 if [ -z "$STAGES" ]; then
   STAGES="concat,audio,video,clean"
@@ -216,6 +223,47 @@ if [ -n "$FFMPEG_THREADS" ]; then
     exit 1
   fi
   thread_option=(-threads "$FFMPEG_THREADS")
+fi
+
+if [ "$DRY_RUN" = true ]; then
+  planned_stages=()
+  $run_concat && planned_stages+=(concat)
+  $run_audio && planned_stages+=(audio)
+  $run_video && planned_stages+=(video)
+  $run_upload && planned_stages+=(upload)
+  $run_clean && planned_stages+=(clean)
+
+  printf 'Dry-Run fuer Datum: %s\n' "$DATE"
+  printf 'Angeforderte Stages: %s\n' "$STAGES"
+  if [ "${#planned_stages[@]}" -gt 0 ]; then
+    (
+      IFS=','
+      printf 'Geplante Stages: %s\n' "${planned_stages[*]}"
+    )
+  else
+    printf 'Geplante Stages: keine\n'
+  fi
+  if $run_concat && ! $explicit_concat; then
+    printf 'Auto-Stage: concat, weil %s fehlt\n' "$MERGED_FILE"
+  fi
+  if $run_audio && ! $explicit_audio; then
+    printf 'Auto-Stage: audio, weil %s fehlt\n' "$PROCESSED_AUDIO"
+  fi
+  if $run_video && ! $explicit_video; then
+    printf 'Auto-Stage: video, weil %s fehlt\n' "$OUTPUT_FILE"
+  fi
+  printf 'Mix-Profil: %s\n' "$AUDIO_MIX_PROFILE"
+  printf 'FFmpeg-Threads: %s\n' "${FFMPEG_THREADS:-default}"
+  printf 'Finale Datei: %s\n' "$OUTPUT_FILE"
+  if [ "$SHUTDOWN" = true ]; then
+    printf 'Abschlussaktion: shutdown\n'
+  elif [ "$NOTIFY" = true ]; then
+    printf 'Abschlussaktion: notify\n'
+  else
+    printf 'Abschlussaktion: keine\n'
+  fi
+  printf 'Dry-Run: keine Dateien werden erstellt, geaendert oder geloescht.\n'
+  exit 0
 fi
 
 ffmpeg_common_args=(-y -loglevel error -hide_banner -nostats)

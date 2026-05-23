@@ -117,6 +117,8 @@ concat,audio,video,clean
   - `./process_videos.sh -e video 2026-03-06`
 - Upload only:
   - `./process_videos.sh -e upload 2026-03-06`
+- Show planned stages without writing files:
+  - `./process_videos.sh -d -e upload 2026-03-06`
 - Set ffmpeg threads:
   - `./process_videos.sh -T 6 2026-03-06`
 

@@ -398,6 +398,9 @@ fi
 if $run_upload; then
   require_cmd "$YOUTUBE_UPLOAD_BIN"
 fi
+if [ "$NOTIFY" = true ]; then
+  require_cmd notify-send
+fi
 
 if $run_concat; then
   if ! $explicit_concat; then
@@ -437,6 +440,7 @@ if $run_clean; then
   rm -f "$PROCESSED_AUDIO"
   rm -f "$MERGED_FILE"
   rm -f "$FILE_LIST_MKV"
+  rm -f "$OUTPUT_DIR/filelist_mkv.txt"
   rm -f "$OUTPUT_DIR/"*"$DATE"*"_piece.mp4"
   rm -f "$OUTPUT_DIR/"*"$DATE"*"_processed_audio.m4a"
   rm -f "$OUTPUT_DIR/filelist.txt"

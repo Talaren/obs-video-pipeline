@@ -22,6 +22,7 @@
 - Upload only (requires final MP4 or auto-builds missing prerequisites): `./process_videos.sh -e upload 2025-08-28`
 - Dry-run stage plan without writing files: `./process_videos.sh -d -e upload 2025-08-28`
 - Run dry-run control-flow tests: `./tests/test_process_videos.sh`
+- Run media pipeline smoke tests: `./tests/test_media_pipeline.sh`
 - Set ffmpeg threads: `./process_videos.sh -T 6 2025-08-28`
 - Mix profile: `./process_videos.sh -m voice-priority 2025-08-28`
 - Lint Bash: `shellcheck process_videos.sh`
@@ -40,6 +41,7 @@
 ## Testing Guidelines
 - Smoke test: run with a small sample MKV and `-e concat,audio,video` to verify outputs.
 - Control-flow tests: run `./tests/test_process_videos.sh` to verify validation, dry-run planning, and auto-stage behavior without processing media.
+- Media smoke tests: run `./tests/test_media_pipeline.sh` to generate tiny MKV fixtures and verify concat/audio/video behavior.
 - Audio stream contract: exactly 3 audio streams are required; verify failure message for non-3 stream layouts.
 - Mix profile checks: test both `-m balanced` and `-m voice-priority`.
 - Idempotence: rerun stages; ensure no unexpected overwrites.

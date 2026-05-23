@@ -201,6 +201,8 @@ Scope behavior:
 
 - Dry-run control-flow tests:
   - `./tests/test_process_videos.sh`
+- Media pipeline smoke tests:
+  - `./tests/test_media_pipeline.sh`
 - Commit signing via SSH key is enabled.
 - `main` branch is protected on GitHub (review required, no force-push/delete).
 - Pre-commit hook at `.githooks/pre-commit` (when enabled with `git config core.hooksPath .githooks`) enforces:

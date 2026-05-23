@@ -5,6 +5,7 @@
   - `process_videos.sh` (main pipeline)
   - `yt_upload.sh` (YouTube upload wrapper)
   - `yt_upload.py` (YouTube Data API uploader)
+- Audio filters: `filters/balanced.fffilter`, `filters/voice-priority.fffilter`
 - Inputs: `~/Videos/OBS/*.mkv` (date contained in filename).
 - Outputs: `~/Videos/OBS/final/`
   - Merged session: `merged_YYYY-MM-DD.mkv`

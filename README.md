@@ -37,6 +37,11 @@ Set with `-m`, for example:
 
 ## Audio Filter Graph (`filter_complex`)
 
+Profile filter files live in `filters/`:
+
+- `filters/balanced.fffilter`
+- `filters/voice-priority.fffilter`
+
 The graph topology is identical for both profiles; only parameter intensity changes.
 
 ```mermaid

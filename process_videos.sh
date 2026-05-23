@@ -286,135 +286,30 @@ run_audio_stage() {
     exit 1
   fi
 
+  local filter_file
   local filter_complex
   local normalized_mix_profile
   normalized_mix_profile="${AUDIO_MIX_PROFILE,,}"
   normalized_mix_profile="${normalized_mix_profile//_/-}"
 
   case "$normalized_mix_profile" in
-    balanced)
-      filter_complex=$(
-        cat <<'EOT'
-[0:a:0]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=90,
-lowpass=f=13500,
-afftdn=nr=12:nf=-45:tn=1,
-equalizer=f=180:t=q:w=1.0:g=-3,
-equalizer=f=3200:t=q:w=1.0:g=4,
-equalizer=f=6500:t=q:w=1.2:g=2,
-dynaudnorm=f=180:g=21:m=12:p=0.95,
-acompressor=threshold=0.1:ratio=3.2:attack=4:release=140:makeup=2,
-alimiter=limit=0.95
-[discord];
-
-[0:a:2]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=95,
-lowpass=f=14000,
-afftdn=nr=10:nf=-46:tn=1,
-equalizer=f=180:t=q:w=1.0:g=-2.5,
-equalizer=f=3000:t=q:w=1.0:g=3.5,
-equalizer=f=6000:t=q:w=1.2:g=1.5,
-dynaudnorm=f=140:g=17:m=10:p=0.95,
-acompressor=threshold=0.09:ratio=3:attack=3:release=120:makeup=1.8,
-alimiter=limit=0.95
-[voice];
-
-[discord][voice]
-amix=inputs=2:dropout_transition=2:normalize=0,
-dynaudnorm=f=120:g=11:m=8:p=0.95,
-acompressor=threshold=0.09:ratio=2.3:attack=3:release=120:makeup=1.2,
-volume=-1dB
-[voices];
-
-[voices]
-asplit=2[voices_main][voices_side];
-
-[0:a:1]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=40,
-lowpass=f=12000,
-dynaudnorm=f=350:g=7:m=8:p=0.95,
-volume=-19dB
-[foundry_base];
-
-[foundry_base][voices_side]
-sidechaincompress=threshold=0.018:ratio=10:attack=6:release=500:makeup=1
-[foundry_ducked];
-
-[voices_main][foundry_ducked]
-amix=inputs=2:dropout_transition=2:normalize=0,
-loudnorm=I=-17:LRA=7:TP=-2,
-alimiter=limit=0.96
-[final_audio]
-EOT
-      )
+    balanced | voice-priority)
       ;;
-    voice-priority | voice)
-      filter_complex=$(
-        cat <<'EOT'
-[0:a:0]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=95,
-lowpass=f=13500,
-afftdn=nr=13:nf=-45:tn=1,
-equalizer=f=200:t=q:w=1.0:g=-3.5,
-equalizer=f=3200:t=q:w=1.0:g=4.5,
-equalizer=f=6500:t=q:w=1.2:g=2.5,
-dynaudnorm=f=160:g=24:m=14:p=0.95,
-acompressor=threshold=0.095:ratio=3.5:attack=3:release=130:makeup=2.2,
-alimiter=limit=0.95
-[discord];
-
-[0:a:2]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=100,
-lowpass=f=14000,
-afftdn=nr=11:nf=-46:tn=1,
-equalizer=f=200:t=q:w=1.0:g=-3,
-equalizer=f=3000:t=q:w=1.0:g=4,
-equalizer=f=6000:t=q:w=1.2:g=2,
-dynaudnorm=f=130:g=20:m=12:p=0.95,
-acompressor=threshold=0.085:ratio=3.2:attack=2:release=120:makeup=2,
-alimiter=limit=0.95
-[voice];
-
-[discord][voice]
-amix=inputs=2:dropout_transition=2:normalize=0,
-dynaudnorm=f=110:g=13:m=9:p=0.95,
-acompressor=threshold=0.085:ratio=2.6:attack=2:release=120:makeup=1.4,
-volume=-0.3dB
-[voices];
-
-[voices]
-asplit=2[voices_main][voices_side];
-
-[0:a:1]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=40,
-lowpass=f=10500,
-dynaudnorm=f=400:g=5:m=6:p=0.95,
-volume=-23dB
-[foundry_base];
-
-[foundry_base][voices_side]
-sidechaincompress=threshold=0.012:ratio=12:attack=4:release=650:makeup=1
-[foundry_ducked];
-
-[voices_main][foundry_ducked]
-amix=inputs=2:dropout_transition=2:normalize=0,
-loudnorm=I=-16:LRA=6:TP=-2,
-alimiter=limit=0.96
-[final_audio]
-EOT
-      )
+    voice)
+      normalized_mix_profile="voice-priority"
       ;;
     *)
       log_msg "Fehler: Unbekanntes Audio-Mix-Profil '$AUDIO_MIX_PROFILE' (erlaubt: balanced, voice-priority)."
       exit 1
       ;;
   esac
+
+  filter_file="$SCRIPT_DIR/filters/${normalized_mix_profile}.fffilter"
+  if [ ! -f "$filter_file" ]; then
+    log_msg "Fehler: Audio-Filterdatei fehlt: $filter_file"
+    exit 1
+  fi
+  filter_complex=$(<"$filter_file")
 
   local tmp_audio
   tmp_audio=$(mktemp --tmpdir="$OUTPUT_DIR" "processed_audio_${DATE}.XXXXXX.m4a")

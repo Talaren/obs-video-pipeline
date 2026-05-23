@@ -194,7 +194,7 @@ run_concat_stage() {
   local raw_files=()
   while IFS= read -r -d '' file; do
     raw_files+=("$file")
-  done < <(find "$VIDEO_DIR" -type f -name "*$DATE*.mkv" -print0 | sort -z)
+  done < <(find "$VIDEO_DIR" -maxdepth 1 -type f -name "*$DATE*.mkv" -print0 | sort -z)
 
   if [ "${#raw_files[@]}" -eq 0 ]; then
     log_msg "Keine Dateien fur $DATE gefunden."

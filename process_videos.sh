@@ -28,7 +28,7 @@ cleanup() {
   if [ -n "${TMP_AUDIO:-}" ] && [ -f "$TMP_AUDIO" ]; then
     rm -f "$TMP_AUDIO"
   fi
-  log_msg "Skript unerwartet beendet. Fuhre ggf. Aufraumarbeiten durch..."
+  log_msg "Skript unerwartet beendet. Fuehre ggf. Aufraeumarbeiten durch..."
 }
 trap cleanup ERR SIGINT SIGTERM
 
@@ -37,7 +37,7 @@ show_help() {
 Verwendung: ./process_videos.sh [Optionen] DATUM
 
 Optionen:
-  -c             Kein Aufraumen am Ende (Standard: Aufraumen aktiv)
+  -c             Kein Aufraeumen am Ende (Standard: Aufraeumen aktiv)
   -n             Benachrichtigung am Ende anzeigen
   -s             Statt Benachrichtigung am Ende Shutdown ausfuhren (setzt NOTIFY=false)
   -e STAGES      Auszufuhrende Schritte, kommagetrennt:
@@ -54,7 +54,7 @@ Audio-Annahme (ohne Fallback):
 
 YouTube-Upload:
   Standard-Uploadclient: ./yt_upload.sh (lokaler API-Client)
-  Fur den ersten Upload werden OAuth Client-Secrets benotigt.
+  Fuer den ersten Upload werden OAuth Client-Secrets benoetigt.
   Zusatzparameter via YOUTUBE_UPLOAD_EXTRA_ARGS (newline-separiert), z. B.:
   $'--client-secrets\n~/.config/yt-upload/client_secrets.json\n--token-file\n~/.config/yt-upload/token.json'
   Komfort-Variablen:
@@ -90,7 +90,7 @@ while getopts ":cnhse:T:m:h" opt; do
       exit 0
       ;;
     \?)
-      echo "Ungultige Option: -$OPTARG" >&2
+      echo "Ungueltige Option: -$OPTARG" >&2
       exit 1
       ;;
     :)
@@ -110,12 +110,12 @@ fi
 
 DATE="$1"
 if [[ ! "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  echo "Ungultiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
   exit 1
 fi
 
 if ! FORMATTED_DATE=$(date -d "$DATE" +"%d.%m.%Y" 2>/dev/null); then
-  echo "Ungultiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
   exit 1
 fi
 
@@ -131,7 +131,7 @@ OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
 exec > >(tee -i "$LOG_FILE") 2>&1
 
-log_msg "Starte Prozess fur Datum: $DATE"
+log_msg "Starte Prozess fuer Datum: $DATE"
 
 if [ -z "$STAGES" ]; then
   STAGES="concat,audio,video,clean"
@@ -222,7 +222,7 @@ ffmpeg_common_args=(-y -loglevel error -hide_banner -nostats)
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    log_msg "Fehler: Benotigtes Kommando '$1' wurde nicht gefunden."
+    log_msg "Fehler: Benoetigtes Kommando '$1' wurde nicht gefunden."
     exit 1
   fi
 }
@@ -232,7 +232,7 @@ escape_for_concat_list() {
 }
 
 run_concat_stage() {
-  log_msg "Fuhre Concat der OBS-Segmente aus..."
+  log_msg "Fuehre Concat der OBS-Segmente aus..."
 
   local raw_files=()
   while IFS= read -r -d '' file; do
@@ -240,7 +240,7 @@ run_concat_stage() {
   done < <(find "$VIDEO_DIR" -maxdepth 1 -type f -name "*$DATE*.mkv" -print0 | sort -z)
 
   if [ "${#raw_files[@]}" -eq 0 ]; then
-    log_msg "Keine Dateien fur $DATE gefunden."
+    log_msg "Keine Dateien fuer $DATE gefunden."
     exit 1
   fi
 
@@ -405,7 +405,7 @@ if $run_concat; then
   fi
   run_concat_stage
 else
-  log_msg "Concat wurde ubersprungen (Stage 'concat' nicht ausgewahlt)."
+  log_msg "Concat wurde uebersprungen (Stage 'concat' nicht ausgewaehlt)."
 fi
 
 if $run_audio; then
@@ -414,7 +414,7 @@ if $run_audio; then
   fi
   run_audio_stage
 else
-  log_msg "Audio-Verarbeitung wurde ubersprungen (Stage 'audio' nicht ausgewahlt)."
+  log_msg "Audio-Verarbeitung wurde uebersprungen (Stage 'audio' nicht ausgewaehlt)."
 fi
 
 if $run_video; then
@@ -423,13 +423,13 @@ if $run_video; then
   fi
   run_video_stage
 else
-  log_msg "Video-Verarbeitung wurde ubersprungen (Stage 'video' nicht ausgewahlt)."
+  log_msg "Video-Verarbeitung wurde uebersprungen (Stage 'video' nicht ausgewaehlt)."
 fi
 
 if $run_upload; then
   run_upload_stage
 else
-  log_msg "Upload wurde ubersprungen (Stage 'upload' nicht ausgewahlt)."
+  log_msg "Upload wurde uebersprungen (Stage 'upload' nicht ausgewaehlt)."
 fi
 
 if $run_clean; then
@@ -451,7 +451,7 @@ if [ "$SHUTDOWN" = true ]; then
   log_msg "Prozess abgeschlossen, fahre System herunter..."
   systemctl poweroff
 elif [ "$NOTIFY" = true ]; then
-  notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fur $DATE sind abgeschlossen."
+  notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fuer $DATE sind abgeschlossen."
 else
   log_msg "Verarbeitung abgeschlossen ohne Benachrichtigung/Shutdown."
 fi

@@ -171,11 +171,14 @@ def upload_video(args: argparse.Namespace) -> tuple[str, str | None]:
   )
 
   response = None
+  last_progress = None
   while response is None:
     status, response = request.next_chunk()
     if status is not None:
       progress = int(status.progress() * 100)
-      print(f"Upload-Fortschritt: {progress}%")
+      if progress != last_progress:
+        print(f"Upload-Fortschritt: {progress}%", flush=True)
+        last_progress = progress
 
   video_id = str(response["id"])
   playlist_item_id = None
@@ -212,10 +215,10 @@ def main() -> int:
     print(f"Unerwarteter Fehler beim Upload: {exc}", file=sys.stderr)
     return 1
 
-  print(f"Upload erfolgreich. Video-ID: {video_id}")
-  print(f"https://youtu.be/{video_id}")
+  print(f"Upload erfolgreich. Video-ID: {video_id}", flush=True)
+  print(f"https://youtu.be/{video_id}", flush=True)
   if playlist_item_id:
-    print(f"Zur Playlist hinzugefugt (PlaylistItem-ID: {playlist_item_id}).")
+    print(f"Zur Playlist hinzugefugt (PlaylistItem-ID: {playlist_item_id}).", flush=True)
   return 0
 
 

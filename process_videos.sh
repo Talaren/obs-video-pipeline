@@ -28,7 +28,7 @@ cleanup() {
   if [ -n "${TMP_AUDIO:-}" ] && [ -f "$TMP_AUDIO" ]; then
     rm -f "$TMP_AUDIO"
   fi
-  log_msg "Skript unerwartet beendet. Fuhre ggf. Aufraumarbeiten durch..."
+  log_msg "Skript unerwartet beendet. Fuehre ggf. Aufraeumarbeiten durch..."
 }
 trap cleanup ERR SIGINT SIGTERM
 
@@ -37,7 +37,7 @@ show_help() {
 Verwendung: ./process_videos.sh [Optionen] DATUM
 
 Optionen:
-  -c             Kein Aufraumen am Ende (Standard: Aufraumen aktiv)
+  -c             Kein Aufraeumen am Ende (Standard: Aufraeumen aktiv)
   -n             Benachrichtigung am Ende anzeigen
   -s             Statt Benachrichtigung am Ende Shutdown ausfuhren (setzt NOTIFY=false)
   -e STAGES      Auszufuhrende Schritte, kommagetrennt:
@@ -54,7 +54,7 @@ Audio-Annahme (ohne Fallback):
 
 YouTube-Upload:
   Standard-Uploadclient: ./yt_upload.sh (lokaler API-Client)
-  Fur den ersten Upload werden OAuth Client-Secrets benotigt.
+  Fuer den ersten Upload werden OAuth Client-Secrets benoetigt.
   Zusatzparameter via YOUTUBE_UPLOAD_EXTRA_ARGS (newline-separiert), z. B.:
   $'--client-secrets\n~/.config/yt-upload/client_secrets.json\n--token-file\n~/.config/yt-upload/token.json'
   Komfort-Variablen:
@@ -90,7 +90,7 @@ while getopts ":cnhse:T:m:h" opt; do
       exit 0
       ;;
     \?)
-      echo "Ungultige Option: -$OPTARG" >&2
+      echo "Ungueltige Option: -$OPTARG" >&2
       exit 1
       ;;
     :)
@@ -109,8 +109,13 @@ if [ $# -lt 1 ]; then
 fi
 
 DATE="$1"
+if [[ ! "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  exit 1
+fi
+
 if ! FORMATTED_DATE=$(date -d "$DATE" +"%d.%m.%Y" 2>/dev/null); then
-  echo "Ungultiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
+  echo "Ungueltiges Datum: $DATE (erwartet: YYYY-MM-DD)" >&2
   exit 1
 fi
 
@@ -120,44 +125,27 @@ mkdir -p "$OUTPUT_DIR"
 
 MERGED_FILE="$OUTPUT_DIR/merged_${DATE}.mkv"
 PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
-FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv.txt"
+FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 
 LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
 exec > >(tee -i "$LOG_FILE") 2>&1
 
-log_msg "Starte Prozess fur Datum: $DATE"
+log_msg "Starte Prozess fuer Datum: $DATE"
 
 if [ -z "$STAGES" ]; then
   STAGES="concat,audio,video,clean"
 fi
 
-run_concat=false
-run_audio=false
-run_video=false
-run_upload=false
-run_clean=false
-
+selected_stages=()
 IFS=',' read -ra steps <<<"$STAGES"
 for step in "${steps[@]}"; do
   normalized_step="${step,,}"
   normalized_step="${normalized_step//[[:space:]]/}"
 
   case "$normalized_step" in
-    concat)
-      run_concat=true
-      ;;
-    audio)
-      run_audio=true
-      ;;
-    video)
-      run_video=true
-      ;;
-    upload)
-      run_upload=true
-      ;;
-    clean)
-      run_clean=true
+    concat | audio | video | upload | clean)
+      selected_stages+=("$normalized_step")
       ;;
     *)
       log_msg "Unbekannter Schritt: $step"
@@ -166,12 +154,67 @@ for step in "${steps[@]}"; do
   esac
 done
 
+stage_enabled() {
+  local wanted="$1"
+  local selected_stage
+
+  for selected_stage in "${selected_stages[@]}"; do
+    if [ "$selected_stage" = "$wanted" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_concat=false
+run_audio=false
+run_video=false
+run_upload=false
+run_clean=false
+
+if stage_enabled concat; then
+  run_concat=true
+fi
+if stage_enabled audio; then
+  run_audio=true
+fi
+if stage_enabled video; then
+  run_video=true
+fi
+if stage_enabled upload; then
+  run_upload=true
+fi
+if stage_enabled clean; then
+  run_clean=true
+fi
+
 if [ "$CLEANUP" = false ]; then
   run_clean=false
 fi
 
+explicit_concat=$run_concat
+explicit_audio=$run_audio
+explicit_video=$run_video
+
+if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
+  run_video=true
+fi
+
+if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
+  run_audio=true
+fi
+
+if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
+  run_concat=true
+fi
+
 thread_option=()
 if [ -n "$FFMPEG_THREADS" ]; then
+  if [[ ! "$FFMPEG_THREADS" =~ ^[0-9]+$ ]]; then
+    log_msg "Fehler: -T erwartet eine nicht-negative Ganzzahl (erhalten: $FFMPEG_THREADS)."
+    exit 1
+  fi
   thread_option=(-threads "$FFMPEG_THREADS")
 fi
 
@@ -179,7 +222,7 @@ ffmpeg_common_args=(-y -loglevel error -hide_banner -nostats)
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    log_msg "Fehler: Benotigtes Kommando '$1' wurde nicht gefunden."
+    log_msg "Fehler: Benoetigtes Kommando '$1' wurde nicht gefunden."
     exit 1
   fi
 }
@@ -189,7 +232,7 @@ escape_for_concat_list() {
 }
 
 run_concat_stage() {
-  log_msg "Fuhre Concat der OBS-Segmente aus..."
+  log_msg "Fuehre Concat der OBS-Segmente aus..."
 
   local raw_files=()
   while IFS= read -r -d '' file; do
@@ -197,7 +240,7 @@ run_concat_stage() {
   done < <(find "$VIDEO_DIR" -maxdepth 1 -type f -name "*$DATE*.mkv" -print0 | sort -z)
 
   if [ "${#raw_files[@]}" -eq 0 ]; then
-    log_msg "Keine Dateien fur $DATE gefunden."
+    log_msg "Keine Dateien fuer $DATE gefunden."
     exit 1
   fi
 
@@ -243,135 +286,30 @@ run_audio_stage() {
     exit 1
   fi
 
+  local filter_file
   local filter_complex
   local normalized_mix_profile
   normalized_mix_profile="${AUDIO_MIX_PROFILE,,}"
   normalized_mix_profile="${normalized_mix_profile//_/-}"
 
   case "$normalized_mix_profile" in
-    balanced)
-      filter_complex=$(
-        cat <<'EOT'
-[0:a:0]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=90,
-lowpass=f=13500,
-afftdn=nr=12:nf=-45:tn=1,
-equalizer=f=180:t=q:w=1.0:g=-3,
-equalizer=f=3200:t=q:w=1.0:g=4,
-equalizer=f=6500:t=q:w=1.2:g=2,
-dynaudnorm=f=180:g=21:m=12:p=0.95,
-acompressor=threshold=0.1:ratio=3.2:attack=4:release=140:makeup=2,
-alimiter=limit=0.95
-[discord];
-
-[0:a:2]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=95,
-lowpass=f=14000,
-afftdn=nr=10:nf=-46:tn=1,
-equalizer=f=180:t=q:w=1.0:g=-2.5,
-equalizer=f=3000:t=q:w=1.0:g=3.5,
-equalizer=f=6000:t=q:w=1.2:g=1.5,
-dynaudnorm=f=140:g=17:m=10:p=0.95,
-acompressor=threshold=0.09:ratio=3:attack=3:release=120:makeup=1.8,
-alimiter=limit=0.95
-[voice];
-
-[discord][voice]
-amix=inputs=2:dropout_transition=2:normalize=0,
-dynaudnorm=f=120:g=11:m=8:p=0.95,
-acompressor=threshold=0.09:ratio=2.3:attack=3:release=120:makeup=1.2,
-volume=-1dB
-[voices];
-
-[voices]
-asplit=2[voices_main][voices_side];
-
-[0:a:1]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=40,
-lowpass=f=12000,
-dynaudnorm=f=350:g=7:m=8:p=0.95,
-volume=-19dB
-[foundry_base];
-
-[foundry_base][voices_side]
-sidechaincompress=threshold=0.018:ratio=10:attack=6:release=500:makeup=1
-[foundry_ducked];
-
-[voices_main][foundry_ducked]
-amix=inputs=2:dropout_transition=2:normalize=0,
-loudnorm=I=-17:LRA=7:TP=-2,
-alimiter=limit=0.96
-[final_audio]
-EOT
-      )
+    balanced | voice-priority)
       ;;
-    voice-priority | voice)
-      filter_complex=$(
-        cat <<'EOT'
-[0:a:0]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=95,
-lowpass=f=13500,
-afftdn=nr=13:nf=-45:tn=1,
-equalizer=f=200:t=q:w=1.0:g=-3.5,
-equalizer=f=3200:t=q:w=1.0:g=4.5,
-equalizer=f=6500:t=q:w=1.2:g=2.5,
-dynaudnorm=f=160:g=24:m=14:p=0.95,
-acompressor=threshold=0.095:ratio=3.5:attack=3:release=130:makeup=2.2,
-alimiter=limit=0.95
-[discord];
-
-[0:a:2]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=100,
-lowpass=f=14000,
-afftdn=nr=11:nf=-46:tn=1,
-equalizer=f=200:t=q:w=1.0:g=-3,
-equalizer=f=3000:t=q:w=1.0:g=4,
-equalizer=f=6000:t=q:w=1.2:g=2,
-dynaudnorm=f=130:g=20:m=12:p=0.95,
-acompressor=threshold=0.085:ratio=3.2:attack=2:release=120:makeup=2,
-alimiter=limit=0.95
-[voice];
-
-[discord][voice]
-amix=inputs=2:dropout_transition=2:normalize=0,
-dynaudnorm=f=110:g=13:m=9:p=0.95,
-acompressor=threshold=0.085:ratio=2.6:attack=2:release=120:makeup=1.4,
-volume=-0.3dB
-[voices];
-
-[voices]
-asplit=2[voices_main][voices_side];
-
-[0:a:1]
-aformat=sample_fmts=fltp:channel_layouts=stereo,
-highpass=f=40,
-lowpass=f=10500,
-dynaudnorm=f=400:g=5:m=6:p=0.95,
-volume=-23dB
-[foundry_base];
-
-[foundry_base][voices_side]
-sidechaincompress=threshold=0.012:ratio=12:attack=4:release=650:makeup=1
-[foundry_ducked];
-
-[voices_main][foundry_ducked]
-amix=inputs=2:dropout_transition=2:normalize=0,
-loudnorm=I=-16:LRA=6:TP=-2,
-alimiter=limit=0.96
-[final_audio]
-EOT
-      )
+    voice)
+      normalized_mix_profile="voice-priority"
       ;;
     *)
       log_msg "Fehler: Unbekanntes Audio-Mix-Profil '$AUDIO_MIX_PROFILE' (erlaubt: balanced, voice-priority)."
       exit 1
       ;;
   esac
+
+  filter_file="$SCRIPT_DIR/filters/${normalized_mix_profile}.fffilter"
+  if [ ! -f "$filter_file" ]; then
+    log_msg "Fehler: Audio-Filterdatei fehlt: $filter_file"
+    exit 1
+  fi
+  filter_complex=$(<"$filter_file")
 
   local tmp_audio
   tmp_audio=$(mktemp --tmpdir="$OUTPUT_DIR" "processed_audio_${DATE}.XXXXXX.m4a")
@@ -451,55 +389,50 @@ run_upload_stage() {
   log_msg "YouTube-Upload abgeschlossen."
 }
 
-require_cmd "$FFMPEG"
-require_cmd ffprobe
+if { $run_concat || $run_audio || $run_video; }; then
+  require_cmd "$FFMPEG"
+fi
+if $run_audio; then
+  require_cmd ffprobe
+fi
 if $run_upload; then
   require_cmd "$YOUTUBE_UPLOAD_BIN"
 fi
-
-if $run_concat; then
-  run_concat_stage
-else
-  log_msg "Concat wurde ubersprungen (Stage 'concat' nicht ausgewahlt)."
+if [ "$NOTIFY" = true ]; then
+  require_cmd notify-send
 fi
 
-if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
-  log_msg "Merged-Datei fehlt ($MERGED_FILE). Starte Concat automatisch."
+if $run_concat; then
+  if ! $explicit_concat; then
+    log_msg "Merged-Datei fehlt ($MERGED_FILE). Starte Concat automatisch."
+  fi
   run_concat_stage
+else
+  log_msg "Concat wurde uebersprungen (Stage 'concat' nicht ausgewaehlt)."
 fi
 
 if $run_audio; then
+  if ! $explicit_audio; then
+    log_msg "Audiodatei fehlt ($PROCESSED_AUDIO). Starte Audio-Schritt automatisch."
+  fi
   run_audio_stage
 else
-  log_msg "Audio-Verarbeitung wurde ubersprungen (Stage 'audio' nicht ausgewahlt)."
-fi
-
-if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
-  log_msg "Audiodatei fehlt ($PROCESSED_AUDIO). Starte Audio-Schritt automatisch."
-  run_audio_stage
+  log_msg "Audio-Verarbeitung wurde uebersprungen (Stage 'audio' nicht ausgewaehlt)."
 fi
 
 if $run_video; then
+  if ! $explicit_video; then
+    log_msg "Finale Datei fehlt ($OUTPUT_FILE). Starte Video-Schritt automatisch."
+  fi
   run_video_stage
 else
-  log_msg "Video-Verarbeitung wurde ubersprungen (Stage 'video' nicht ausgewahlt)."
-fi
-
-if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
-  log_msg "Finale Datei fehlt ($OUTPUT_FILE). Erzeuge Video automatisch fur Upload."
-  if [ ! -f "$MERGED_FILE" ]; then
-    run_concat_stage
-  fi
-  if [ ! -f "$PROCESSED_AUDIO" ]; then
-    run_audio_stage
-  fi
-  run_video_stage
+  log_msg "Video-Verarbeitung wurde uebersprungen (Stage 'video' nicht ausgewaehlt)."
 fi
 
 if $run_upload; then
   run_upload_stage
 else
-  log_msg "Upload wurde ubersprungen (Stage 'upload' nicht ausgewahlt)."
+  log_msg "Upload wurde uebersprungen (Stage 'upload' nicht ausgewaehlt)."
 fi
 
 if $run_clean; then
@@ -507,6 +440,7 @@ if $run_clean; then
   rm -f "$PROCESSED_AUDIO"
   rm -f "$MERGED_FILE"
   rm -f "$FILE_LIST_MKV"
+  rm -f "$OUTPUT_DIR/filelist_mkv.txt"
   rm -f "$OUTPUT_DIR/"*"$DATE"*"_piece.mp4"
   rm -f "$OUTPUT_DIR/"*"$DATE"*"_processed_audio.m4a"
   rm -f "$OUTPUT_DIR/filelist.txt"
@@ -521,7 +455,7 @@ if [ "$SHUTDOWN" = true ]; then
   log_msg "Prozess abgeschlossen, fahre System herunter..."
   systemctl poweroff
 elif [ "$NOTIFY" = true ]; then
-  notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fur $DATE sind abgeschlossen."
+  notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fuer $DATE sind abgeschlossen."
 else
   log_msg "Verarbeitung abgeschlossen ohne Benachrichtigung/Shutdown."
 fi

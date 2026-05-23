@@ -5,11 +5,12 @@
   - `process_videos.sh` (main pipeline)
   - `yt_upload.sh` (YouTube upload wrapper)
   - `yt_upload.py` (YouTube Data API uploader)
+- Audio filters: `filters/balanced.fffilter`, `filters/voice-priority.fffilter`
 - Inputs: `~/Videos/OBS/*.mkv` (date contained in filename).
 - Outputs: `~/Videos/OBS/final/`
   - Merged session: `merged_YYYY-MM-DD.mkv`
   - Processed audio: `processed_audio_YYYY-MM-DD.m4a`
-  - Concat list: `filelist_mkv.txt`
+  - Concat list: `filelist_mkv_YYYY-MM-DD.txt` (only with multiple segments)
   - Final: `DSA5 mit Marth DD.MM.YYYY final.mp4`
 
 ## Build, Test, and Development Commands
@@ -72,7 +73,7 @@
   - `YOUTUBE_UPLOAD_PLAYLIST_ID` adds uploaded video to a playlist.
   - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets insertion index in that playlist.
   - Extra uploader args are passed via newline-separated `YOUTUBE_UPLOAD_EXTRA_ARGS`.
-- Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`).
+- Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv_YYYY-MM-DD.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`, `filelist_mkv.txt`).
 
 ## Git Safety Baseline
 - Branch: `main` is protected on GitHub (`Talaren/obs-video-pipeline`).

@@ -37,6 +37,11 @@ Set with `-m`, for example:
 
 ## Audio Filter Graph (`filter_complex`)
 
+Profile filter files live in `filters/`:
+
+- `filters/balanced.fffilter`
+- `filters/voice-priority.fffilter`
+
 The graph topology is identical for both profiles; only parameter intensity changes.
 
 ```mermaid
@@ -186,7 +191,7 @@ Scope behavior:
 - Output (`~/Videos/OBS/final/`):
   - `merged_YYYY-MM-DD.mkv`
   - `processed_audio_YYYY-MM-DD.m4a`
-  - `filelist_mkv.txt`
+  - `filelist_mkv_YYYY-MM-DD.txt` (only with multiple segments)
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
   - `full_pipeline_YYYY-MM-DD_*.log`
 

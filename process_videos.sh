@@ -220,7 +220,7 @@ run_concat_stage() {
 
   "$FFMPEG" "${ffmpeg_common_args[@]}" "${thread_option[@]}" \
     -f concat -safe 0 -i "$FILE_LIST_MKV" \
-    -c copy "$MERGED_FILE"
+    -map 0 -c copy "$MERGED_FILE"
 
   log_msg "Merged-Datei erstellt: $MERGED_FILE"
 }

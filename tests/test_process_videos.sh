@@ -217,7 +217,7 @@ main() {
   test_dry_run_does_not_write_output_dir
   test_invalid_thread_logs_in_non_dry_run
 
-  printf 'All process_videos dry-run tests passed.\n'
+  printf 'All process_videos control-flow tests passed.\n'
 }
 
 main "$@"

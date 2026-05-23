@@ -132,6 +132,14 @@ PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
 FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 
+if [ "$DRY_RUN" = false ]; then
+  mkdir -p "$OUTPUT_DIR"
+  LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
+  exec > >(tee -i "$LOG_FILE") 2>&1
+
+  log_msg "Starte Prozess fuer Datum: $DATE"
+fi
+
 if [ -z "$STAGES" ]; then
   STAGES="concat,audio,video,clean"
 fi
@@ -257,12 +265,6 @@ if [ "$DRY_RUN" = true ]; then
   printf 'Dry-Run: keine Dateien werden erstellt, geaendert oder geloescht.\n'
   exit 0
 fi
-
-mkdir -p "$OUTPUT_DIR"
-LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
-exec > >(tee -i "$LOG_FILE") 2>&1
-
-log_msg "Starte Prozess fuer Datum: $DATE"
 
 ffmpeg_common_args=(-y -loglevel error -hide_banner -nostats)
 

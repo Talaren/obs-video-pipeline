@@ -102,8 +102,8 @@ create_three_stream_segment() {
     -f lavfi -i "sine=frequency=660:duration=0.6" \
     -f lavfi -i "sine=frequency=880:duration=0.6" \
     -map 0:v:0 -map 1:a:0 -map 2:a:0 -map 3:a:0 \
-    -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-    -c:a libopus -b:a 64k \
+    -c:v mpeg4 -q:v 5 -pix_fmt yuv420p \
+    -c:a aac -b:a 64k \
     -metadata:s:a:0 title=Track1 \
     -metadata:s:a:1 title=Track2 \
     -metadata:s:a:2 title=Track3 \
@@ -117,8 +117,8 @@ create_one_stream_segment() {
     -f lavfi -i "testsrc2=size=160x90:rate=10:duration=0.6" \
     -f lavfi -i "sine=frequency=440:duration=0.6" \
     -map 0:v:0 -map 1:a:0 \
-    -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-    -c:a libopus -b:a 64k \
+    -c:v mpeg4 -q:v 5 -pix_fmt yuv420p \
+    -c:a aac -b:a 64k \
     -metadata:s:a:0 title=Track1 \
     "$output_file"
 }
@@ -175,8 +175,8 @@ test_audio_stage_rejects_non_three_stream_layout() {
 main() {
   require_cmd ffmpeg
   require_cmd ffprobe
-  require_ffmpeg_encoder libopus
-  require_ffmpeg_encoder libx264
+  require_ffmpeg_encoder aac
+  require_ffmpeg_encoder mpeg4
 
   test_concat_preserves_three_audio_streams
   test_audio_and_video_stages_create_outputs

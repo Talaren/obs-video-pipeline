@@ -175,6 +175,22 @@ if [ "$CLEANUP" = false ]; then
   run_clean=false
 fi
 
+explicit_concat=$run_concat
+explicit_audio=$run_audio
+explicit_video=$run_video
+
+if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
+  run_video=true
+fi
+
+if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
+  run_audio=true
+fi
+
+if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
+  run_concat=true
+fi
+
 thread_option=()
 if [ -n "$FFMPEG_THREADS" ]; then
   thread_option=(-threads "$FFMPEG_THREADS")
@@ -188,28 +204,6 @@ require_cmd() {
     exit 1
   fi
 }
-
-needs_concat_cmd=$run_concat
-needs_audio_cmd=$run_audio
-needs_video_cmd=$run_video
-
-if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
-  needs_concat_cmd=true
-fi
-
-if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
-  needs_audio_cmd=true
-fi
-
-if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
-  needs_video_cmd=true
-  if [ ! -f "$MERGED_FILE" ]; then
-    needs_concat_cmd=true
-  fi
-  if [ ! -f "$PROCESSED_AUDIO" ]; then
-    needs_audio_cmd=true
-  fi
-fi
 
 escape_for_concat_list() {
   printf "%s" "$1" | sed "s/'/'\\\\''/g"
@@ -478,10 +472,10 @@ run_upload_stage() {
   log_msg "YouTube-Upload abgeschlossen."
 }
 
-if { $needs_concat_cmd || $needs_audio_cmd || $needs_video_cmd; }; then
+if { $run_concat || $run_audio || $run_video; }; then
   require_cmd "$FFMPEG"
 fi
-if $needs_audio_cmd; then
+if $run_audio; then
   require_cmd ffprobe
 fi
 if $run_upload; then
@@ -489,42 +483,30 @@ if $run_upload; then
 fi
 
 if $run_concat; then
+  if ! $explicit_concat; then
+    log_msg "Merged-Datei fehlt ($MERGED_FILE). Starte Concat automatisch."
+  fi
   run_concat_stage
 else
   log_msg "Concat wurde ubersprungen (Stage 'concat' nicht ausgewahlt)."
 fi
 
-if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
-  log_msg "Merged-Datei fehlt ($MERGED_FILE). Starte Concat automatisch."
-  run_concat_stage
-fi
-
 if $run_audio; then
+  if ! $explicit_audio; then
+    log_msg "Audiodatei fehlt ($PROCESSED_AUDIO). Starte Audio-Schritt automatisch."
+  fi
   run_audio_stage
 else
   log_msg "Audio-Verarbeitung wurde ubersprungen (Stage 'audio' nicht ausgewahlt)."
 fi
 
-if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
-  log_msg "Audiodatei fehlt ($PROCESSED_AUDIO). Starte Audio-Schritt automatisch."
-  run_audio_stage
-fi
-
 if $run_video; then
+  if ! $explicit_video; then
+    log_msg "Finale Datei fehlt ($OUTPUT_FILE). Starte Video-Schritt automatisch."
+  fi
   run_video_stage
 else
   log_msg "Video-Verarbeitung wurde ubersprungen (Stage 'video' nicht ausgewahlt)."
-fi
-
-if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
-  log_msg "Finale Datei fehlt ($OUTPUT_FILE). Erzeuge Video automatisch fur Upload."
-  if [ ! -f "$MERGED_FILE" ]; then
-    run_concat_stage
-  fi
-  if [ ! -f "$PROCESSED_AUDIO" ]; then
-    run_audio_stage
-  fi
-  run_video_stage
 fi
 
 if $run_upload; then

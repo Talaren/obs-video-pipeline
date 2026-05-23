@@ -189,6 +189,28 @@ require_cmd() {
   fi
 }
 
+needs_concat_cmd=$run_concat
+needs_audio_cmd=$run_audio
+needs_video_cmd=$run_video
+
+if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
+  needs_concat_cmd=true
+fi
+
+if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
+  needs_audio_cmd=true
+fi
+
+if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
+  needs_video_cmd=true
+  if [ ! -f "$MERGED_FILE" ]; then
+    needs_concat_cmd=true
+  fi
+  if [ ! -f "$PROCESSED_AUDIO" ]; then
+    needs_audio_cmd=true
+  fi
+fi
+
 escape_for_concat_list() {
   printf "%s" "$1" | sed "s/'/'\\\\''/g"
 }
@@ -456,8 +478,12 @@ run_upload_stage() {
   log_msg "YouTube-Upload abgeschlossen."
 }
 
-require_cmd "$FFMPEG"
-require_cmd ffprobe
+if { $needs_concat_cmd || $needs_audio_cmd || $needs_video_cmd; }; then
+  require_cmd "$FFMPEG"
+fi
+if $needs_audio_cmd; then
+  require_cmd ffprobe
+fi
 if $run_upload; then
   require_cmd "$YOUTUBE_UPLOAD_BIN"
 fi

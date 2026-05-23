@@ -218,7 +218,7 @@ def main() -> int:
   print(f"Upload erfolgreich. Video-ID: {video_id}", flush=True)
   print(f"https://youtu.be/{video_id}", flush=True)
   if playlist_item_id:
-    print(f"Zur Playlist hinzugefugt (PlaylistItem-ID: {playlist_item_id}).", flush=True)
+    print(f"Zur Playlist hinzugefuegt (PlaylistItem-ID: {playlist_item_id}).", flush=True)
   return 0
 
 

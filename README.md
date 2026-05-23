@@ -186,7 +186,7 @@ Scope behavior:
 - Output (`~/Videos/OBS/final/`):
   - `merged_YYYY-MM-DD.mkv`
   - `processed_audio_YYYY-MM-DD.m4a`
-  - `filelist_mkv.txt`
+  - `filelist_mkv_YYYY-MM-DD.txt`
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
   - `full_pipeline_YYYY-MM-DD_*.log`
 

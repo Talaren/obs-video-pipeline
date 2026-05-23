@@ -125,7 +125,7 @@ mkdir -p "$OUTPUT_DIR"
 
 MERGED_FILE="$OUTPUT_DIR/merged_${DATE}.mkv"
 PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
-FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv.txt"
+FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 
 LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"

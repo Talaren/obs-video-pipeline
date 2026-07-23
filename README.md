@@ -2,17 +2,29 @@
 
 Automates post-processing for OBS recordings by date, keeps video stream copy-only, improves voice clarity, and can upload the final video to YouTube as `unlisted`.
 
+## Requirements
+
+- Linux with Bash 4 or newer and GNU userland (`date -d`, `find -print0`, `sort -z`)
+- A recent FFmpeg build providing `ffmpeg`, `ffprobe`, `loudnorm`, `sidechaincompress`, and the AAC encoder
+- Enough free space for the merged MKV, processed audio, and final MP4 during a full run
+- Optional desktop/system integration:
+  - `notify-send` for `-n`
+  - `systemctl` with permission to power off for `-s`
+- Python 3.10 or newer plus the packages in `requirements.txt` for YouTube uploads
+
 ## What It Does
 
 - Collects `*$DATE*.mkv` from `~/Videos/OBS` in sorted order.
 - Concatenates segments into `merged_YYYY-MM-DD.mkv` (`-c copy`).
-- Processes audio once for the full session into `processed_audio_YYYY-MM-DD.m4a`.
+- Processes audio once for the full session into 48-kHz AAC at `processed_audio_YYYY-MM-DD.m4a`.
 - Remuxes final MP4:
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
   - Video: `-c:v copy`
   - Audio: processed AAC track (`-c:a copy` at remux stage)
   - `-movflags +faststart`
 - Uploads the final MP4 to YouTube as `unlisted` (optional stage).
+
+Media outputs are written to private, owner-writable temporary files in the output directory and replace an existing target only after the corresponding copy, encode, or remux succeeds. Publication then applies the current `umask`; a single-segment copy retains the source permissions masked by `umask`, and replacements preserve the existing target permissions. Existing output targets must be regular files; directories, special files, and symbolic links are rejected.
 
 ## Audio Model (Strict, No Fallback)
 
@@ -103,6 +115,10 @@ Default order if `-e` is not provided:
 concat,audio,video,clean
 ```
 
+`-e` selects a set of stages; supplied names do not change the fixed execution order shown above. Missing prerequisites are added automatically, but only file existence is checked. Modification times are not compared. Use the full default pipeline after source recordings change, and use `-e upload` only when the existing final MP4 is known to be current.
+
+All segments selected for concat must have compatible stream layouts, codecs, and recording parameters. Do not run two pipeline processes for the same date concurrently.
+
 ## Usage
 
 - Full default pipeline:
@@ -121,6 +137,8 @@ concat,audio,video,clean
   - `./process_videos.sh -d -e upload 2026-03-06`
 - Set ffmpeg threads:
   - `./process_videos.sh -T 6 2026-03-06`
+- Keep intermediate artifacts for inspection or reuse:
+  - `./process_videos.sh -c 2026-03-06`
 
 ## YouTube Upload Setup (Google API)
 
@@ -133,7 +151,7 @@ The pipeline uses:
 
 ```bash
 python3 -m venv .venv-youtube-upload
-.venv-youtube-upload/bin/pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+.venv-youtube-upload/bin/pip install --requirement requirements.txt
 ```
 
 ### 2) Create OAuth client secrets
@@ -153,6 +171,12 @@ On first upload, OAuth login runs and token is stored at:
 
 ```text
 ~/.config/yt-upload/token.json
+```
+
+If the machine should print the authorization URL without attempting to launch a browser, pass `--no-browser` through the extra arguments:
+
+```bash
+export YOUTUBE_UPLOAD_EXTRA_ARGS="--no-browser"
 ```
 
 ### 3) Run upload stage
@@ -186,14 +210,29 @@ Scope behavior:
 - Upload without playlist requests only `youtube.upload`.
 - If `--playlist-id` / `YOUTUBE_UPLOAD_PLAYLIST_ID` is used, uploader requests an additional YouTube scope and may ask for OAuth consent again.
 
+Uploads use resumable chunks and retry temporary network and HTTP 5xx failures with exponential backoff. If the video upload succeeds but playlist insertion fails, the uploader exits with the dedicated status `3` and prints the existing video ID. Status `2` remains available for command-line parsing errors. Do not rerun the complete upload after status `3`.
+
+### Upload configuration
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `YOUTUBE_UPLOAD_DESCRIPTION` | Video description | `Archivaufnahme einer DSA5-Runde.` |
+| `YOUTUBE_UPLOAD_TAGS` | Comma-separated tags | empty |
+| `YOUTUBE_UPLOAD_PLAYLIST_ID` | Playlist receiving the uploaded video | empty |
+| `YOUTUBE_UPLOAD_PLAYLIST_POSITION` | Optional playlist insertion index | empty |
+| `YOUTUBE_UPLOAD_EXTRA_ARGS` | Newline-separated arguments for `yt_upload.py` | empty |
+| `YOUTUBE_UPLOAD_BIN` | Alternative upload command used by the pipeline | `./yt_upload.sh` |
+| `YT_UPLOAD_PYTHON` | Python executable used by `yt_upload.sh` | `.venv-youtube-upload/bin/python3` |
+| `AUDIO_MIX_PROFILE` | Default mix profile when `-m` is omitted | `balanced` |
+
 ## Inputs and Outputs
 
 - Input:
   - `~/Videos/OBS/*.mkv`
 - Output (`~/Videos/OBS/final/`):
-  - `merged_YYYY-MM-DD.mkv`
-  - `processed_audio_YYYY-MM-DD.m4a`
-  - `filelist_mkv_YYYY-MM-DD.txt` (only with multiple segments)
+  - `merged_YYYY-MM-DD.mkv` (intermediate; removed by the default `clean` stage)
+  - `processed_audio_YYYY-MM-DD.m4a` (intermediate; removed by default)
+  - `filelist_mkv_YYYY-MM-DD.txt` (multiple segments only; removed by default)
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
   - `full_pipeline_YYYY-MM-DD_*.log`
 
@@ -203,7 +242,9 @@ Scope behavior:
   - `./tests/test_process_videos.sh`
 - Media pipeline smoke tests:
   - `./tests/test_media_pipeline.sh`
-- Commit signing via SSH key is enabled.
+- Uploader unit tests:
+  - `.venv-youtube-upload/bin/python3 -m unittest tests/test_yt_upload.py`
+- GitHub Actions runs syntax, lint, formatting, control-flow, media, and uploader tests.
 - `main` branch is protected on GitHub (review required, no force-push/delete).
 - Pre-commit hook at `.githooks/pre-commit` (when enabled with `git config core.hooksPath .githooks`) enforces:
   - `shellcheck`
@@ -213,7 +254,9 @@ Scope behavior:
 
 ## Notes
 
-- `clean` removes workflow artifacts for the selected date and keeps the final MP4.
+- `clean` removes current intermediate artifacts for the selected date and legacy shared concat lists, but keeps the final MP4 and logs.
 - `-c` disables cleanup even if `clean` stage is in the list.
 - `-s` triggers shutdown after completion.
 - `-n` sends a desktop notification after completion.
+- If both `-s` and `-n` are supplied, shutdown takes precedence regardless of option order.
+- Exactly one positional date argument is accepted.

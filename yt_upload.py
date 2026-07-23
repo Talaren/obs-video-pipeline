@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
+import random
 import sys
 import tempfile
+import time
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
+import httplib2
+from google.auth.exceptions import TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -23,6 +28,21 @@ PLAYLIST_SCOPE = "https://www.googleapis.com/auth/youtube"
 DEFAULT_CLIENT_SECRETS = Path.home() / ".config" / "yt-upload" / "client_secrets.json"
 DEFAULT_TOKEN_FILE = Path.home() / ".config" / "yt-upload" / "token.json"
 VALID_PRIVACY = {"private", "public", "unlisted"}
+MAX_RETRIES = 10
+PLAYLIST_PARTIAL_EXIT_STATUS = 3
+RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
+RETRIABLE_EXCEPTIONS = (
+    TransportError,
+    httplib2.HttpLib2Error,
+    OSError,
+    http.client.NotConnected,
+    http.client.IncompleteRead,
+    http.client.ImproperConnectionState,
+    http.client.CannotSendRequest,
+    http.client.CannotSendHeader,
+    http.client.ResponseNotReady,
+    http.client.BadStatusLine,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +66,11 @@ def parse_args() -> argparse.Namespace:
       "--token-file",
       default=str(DEFAULT_TOKEN_FILE),
       help=f"OAuth token cache path (default: {DEFAULT_TOKEN_FILE})",
+  )
+  parser.add_argument(
+      "--no-browser",
+      action="store_true",
+      help="Print the OAuth URL without attempting to open a browser",
   )
   parser.add_argument(
       "--made-for-kids",
@@ -87,7 +112,13 @@ def write_token_file(token_path: Path, token_json: str) -> None:
       os.remove(tmp_name)
 
 
-def load_credentials(client_secrets_path: Path, token_path: Path, scopes: List[str]) -> Credentials:
+def load_credentials(
+    client_secrets_path: Path,
+    token_path: Path,
+    scopes: List[str],
+    *,
+    open_browser: bool,
+) -> Credentials:
   creds = None
   if token_path.exists():
     creds = Credentials.from_authorized_user_file(str(token_path), scopes)
@@ -98,10 +129,7 @@ def load_credentials(client_secrets_path: Path, token_path: Path, scopes: List[s
   # Force a new OAuth flow when scopes are missing (e.g. playlist support added later).
   if not creds or not creds.valid or not creds.has_scopes(scopes):
     flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets_path), scopes)
-    try:
-      creds = flow.run_local_server(port=0, open_browser=True)
-    except Exception:
-      creds = flow.run_console()
+    creds = flow.run_local_server(port=0, open_browser=open_browser)
 
   write_token_file(token_path, creds.to_json())
   return creds
@@ -130,7 +158,58 @@ def add_to_playlist(youtube, video_id: str, playlist_id: str, position: int | No
   return str(response["id"])
 
 
-def upload_video(args: argparse.Namespace) -> tuple[str, str | None]:
+def resumable_upload(request) -> str:
+  response = None
+  last_progress = None
+  retry = 0
+
+  while response is None:
+    retry_error = None
+    retry_after = None
+    try:
+      status, response = request.next_chunk()
+      if status is not None:
+        progress = int(status.progress() * 100)
+        if progress != last_progress:
+          print(f"Upload-Fortschritt: {progress}%", flush=True)
+          last_progress = progress
+    except HttpError as exc:
+      if exc.resp.status not in RETRIABLE_STATUS_CODES:
+        raise
+      retry_error = f"HTTP {exc.resp.status}: {exc}"
+      retry_after = exc.resp.get("retry-after")
+    except RETRIABLE_EXCEPTIONS as exc:
+      retry_error = str(exc)
+
+    if retry_error is None:
+      continue
+
+    retry += 1
+    if retry > MAX_RETRIES:
+      raise RuntimeError(f"Upload nach {MAX_RETRIES} Wiederholungen abgebrochen: {retry_error}")
+
+    if retry_after is not None:
+      try:
+        sleep_seconds = max(0.0, float(retry_after))
+      except ValueError:
+        sleep_seconds = random.random() * (2**retry)
+    else:
+      sleep_seconds = random.random() * (2**retry)
+
+    print(
+        f"Voruebergehender Upload-Fehler ({retry_error}); "
+        f"neuer Versuch in {sleep_seconds:.1f} Sekunden.",
+        file=sys.stderr,
+        flush=True,
+    )
+    time.sleep(sleep_seconds)
+
+  if "id" not in response:
+    raise RuntimeError(f"Unerwartete Upload-Antwort ohne Video-ID: {response}")
+  return str(response["id"])
+
+
+def upload_video(args: argparse.Namespace) -> tuple[Any, str]:
   video_path = Path(args.video_file).expanduser().resolve()
   if not video_path.is_file():
     raise FileNotFoundError(f"Videodatei nicht gefunden: {video_path}")
@@ -146,7 +225,12 @@ def upload_video(args: argparse.Namespace) -> tuple[str, str | None]:
 
   token_path = Path(args.token_file).expanduser()
   scopes = required_scopes(args.playlist_id)
-  creds = load_credentials(client_secrets_path, token_path, scopes)
+  creds = load_credentials(
+      client_secrets_path,
+      token_path,
+      scopes,
+      open_browser=not args.no_browser,
+  )
   youtube = build("youtube", "v3", credentials=creds)
 
   body = {
@@ -170,27 +254,15 @@ def upload_video(args: argparse.Namespace) -> tuple[str, str | None]:
       media_body=MediaFileUpload(str(video_path), chunksize=8 * 1024 * 1024, resumable=True),
   )
 
-  response = None
-  last_progress = None
-  while response is None:
-    status, response = request.next_chunk()
-    if status is not None:
-      progress = int(status.progress() * 100)
-      if progress != last_progress:
-        print(f"Upload-Fortschritt: {progress}%", flush=True)
-        last_progress = progress
+  return youtube, resumable_upload(request)
 
-  video_id = str(response["id"])
-  playlist_item_id = None
-  if args.playlist_id.strip():
-    playlist_item_id = add_to_playlist(
-        youtube,
-        video_id,
-        args.playlist_id.strip(),
-        args.playlist_position,
-    )
 
-  return video_id, playlist_item_id
+def format_http_error(exc: HttpError) -> str:
+  try:
+    details = json.loads(exc.content.decode("utf-8"))
+  except Exception:
+    details = {"error": {"message": str(exc)}}
+  return json.dumps(details, ensure_ascii=False)
 
 
 def main() -> int:
@@ -200,16 +272,12 @@ def main() -> int:
     return 1
 
   try:
-    video_id, playlist_item_id = upload_video(args)
+    youtube, video_id = upload_video(args)
   except FileNotFoundError as exc:
     print(f"Fehler: {exc}", file=sys.stderr)
     return 1
   except HttpError as exc:
-    try:
-      details = json.loads(exc.content.decode("utf-8"))
-    except Exception:
-      details = {"error": {"message": str(exc)}}
-    print(f"YouTube API-Fehler: {json.dumps(details, ensure_ascii=False)}", file=sys.stderr)
+    print(f"YouTube API-Fehler: {format_http_error(exc)}", file=sys.stderr)
     return 1
   except Exception as exc:
     print(f"Unerwarteter Fehler beim Upload: {exc}", file=sys.stderr)
@@ -217,7 +285,32 @@ def main() -> int:
 
   print(f"Upload erfolgreich. Video-ID: {video_id}", flush=True)
   print(f"https://youtu.be/{video_id}", flush=True)
-  if playlist_item_id:
+
+  if args.playlist_id.strip():
+    try:
+      playlist_item_id = add_to_playlist(
+          youtube,
+          video_id,
+          args.playlist_id.strip(),
+          args.playlist_position,
+      )
+    except HttpError as exc:
+      print(
+          "Video wurde hochgeladen, konnte aber nicht zur Playlist hinzugefuegt werden. "
+          f"Nicht erneut hochladen; vorhandene Video-ID verwenden: {video_id}",
+          file=sys.stderr,
+      )
+      print(f"YouTube API-Fehler: {format_http_error(exc)}", file=sys.stderr)
+      return PLAYLIST_PARTIAL_EXIT_STATUS
+    except Exception as exc:
+      print(
+          "Video wurde hochgeladen, konnte aber nicht zur Playlist hinzugefuegt werden. "
+          f"Nicht erneut hochladen; vorhandene Video-ID verwenden: {video_id}",
+          file=sys.stderr,
+      )
+      print(f"Playlist-Fehler: {exc}", file=sys.stderr)
+      return PLAYLIST_PARTIAL_EXIT_STATUS
+
     print(f"Zur Playlist hinzugefuegt (PlaylistItem-ID: {playlist_item_id}).", flush=True)
   return 0
 

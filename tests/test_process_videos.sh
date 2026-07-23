@@ -5,18 +5,14 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PROCESS_SCRIPT="$REPO_DIR/process_videos.sh"
 
-TEST_TMP_DIRS=()
+TEST_TMP_ROOT="$(mktemp -d)"
 LAST_OUTPUT=""
 LAST_STATUS=0
 
 cleanup() {
-  local dir
-
-  for dir in "${TEST_TMP_DIRS[@]}"; do
-    if [ -n "$dir" ] && [ -d "$dir" ]; then
-      rm -rf "$dir"
-    fi
-  done
+  if [ -n "$TEST_TMP_ROOT" ] && [ -d "$TEST_TMP_ROOT" ]; then
+    rm -rf "$TEST_TMP_ROOT"
+  fi
 }
 trap cleanup EXIT
 
@@ -59,11 +55,7 @@ assert_not_contains() {
 }
 
 new_temp_dir() {
-  local dir
-
-  dir="$(mktemp -d)"
-  TEST_TMP_DIRS+=("$dir")
-  printf '%s\n' "$dir"
+  mktemp -d "$TEST_TMP_ROOT/home.XXXXXX"
 }
 
 new_home() {
@@ -80,6 +72,17 @@ run_pipeline() {
 
   set +e
   LAST_OUTPUT=$(HOME="$test_home" "$PROCESS_SCRIPT" "$@" 2>&1)
+  LAST_STATUS=$?
+  set -e
+}
+
+run_pipeline_with_uploader() {
+  local test_home="$1"
+  local uploader="$2"
+  shift 2
+
+  set +e
+  LAST_OUTPUT=$(HOME="$test_home" YOUTUBE_UPLOAD_BIN="$uploader" "$PROCESS_SCRIPT" "$@" 2>&1)
   LAST_STATUS=$?
   set -e
 }
@@ -112,6 +115,19 @@ test_invalid_stage_and_threads() {
   run_pipeline "$test_home" -d -T abc 2099-01-01
   assert_eq 1 "$LAST_STATUS" "invalid thread count must fail"
   assert_contains "Fehler: -T erwartet eine nicht-negative Ganzzahl" "invalid thread error should be clear"
+}
+
+test_invalid_profile_and_extra_argument() {
+  local test_home
+  test_home=$(new_home)
+
+  run_pipeline "$test_home" -d -m does-not-exist 2099-01-01
+  assert_eq 1 "$LAST_STATUS" "unknown audio profile must fail in dry-run"
+  assert_contains "Unbekanntes Audio-Mix-Profil" "unknown profile error should be clear"
+
+  run_pipeline "$test_home" -d 2099-01-01 extra
+  assert_eq 1 "$LAST_STATUS" "extra positional arguments must fail"
+  assert_contains "Zu viele Argumente" "extra argument error should be clear"
 }
 
 test_dry_run_upload_autostages_without_artifacts() {
@@ -174,6 +190,14 @@ test_dry_run_finish_actions() {
   run_pipeline "$test_home" -d -n 2099-01-01
   assert_eq 0 "$LAST_STATUS" "notify dry-run should succeed"
   assert_contains "Abschlussaktion: notify" "notify action should be shown"
+
+  run_pipeline "$test_home" -d -s -n 2099-01-01
+  assert_eq 0 "$LAST_STATUS" "shutdown should win regardless of option order"
+  assert_contains "Abschlussaktion: shutdown" "shutdown should take precedence over notify"
+
+  run_pipeline "$test_home" -d -n -s 2099-01-01
+  assert_eq 0 "$LAST_STATUS" "shutdown should win in the opposite option order"
+  assert_contains "Abschlussaktion: shutdown" "shutdown precedence should be order-independent"
 }
 
 test_dry_run_does_not_write_output_dir() {
@@ -206,9 +230,35 @@ test_invalid_thread_logs_in_non_dry_run() {
   fi
 }
 
+test_upload_exit_codes_are_disambiguated() {
+  local test_home
+  local uploader
+  local final_file
+  test_home=$(new_home)
+  uploader="$test_home/fake-uploader"
+  final_file="$test_home/Videos/OBS/final/DSA5 mit Marth 01.01.2099 final.mp4"
+  : >"$final_file"
+
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 3' >"$uploader"
+  chmod +x "$uploader"
+
+  run_pipeline_with_uploader "$test_home" "$uploader" -e upload 2099-01-01
+  assert_eq 3 "$LAST_STATUS" "playlist partial success should retain its dedicated exit status"
+  assert_contains "Playlist-Zuordnung ist fehlgeschlagen" "partial success should be reported clearly"
+  assert_not_contains "Skript unerwartet beendet" "known partial success should not be reported as an unexpected failure"
+
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 2' >"$uploader"
+
+  run_pipeline_with_uploader "$test_home" "$uploader" -e upload 2099-01-01
+  assert_eq 2 "$LAST_STATUS" "argparse-style failures should retain exit status 2"
+  assert_not_contains "Playlist-Zuordnung ist fehlgeschlagen" "argparse failure must not claim a completed upload"
+  assert_contains "Skript unerwartet beendet" "argparse failure should follow the normal error path"
+}
+
 main() {
   test_invalid_dates
   test_invalid_stage_and_threads
+  test_invalid_profile_and_extra_argument
   test_dry_run_upload_autostages_without_artifacts
   test_dry_run_video_autostages_without_artifacts
   test_dry_run_upload_with_final_artifact
@@ -216,6 +266,7 @@ main() {
   test_dry_run_finish_actions
   test_dry_run_does_not_write_output_dir
   test_invalid_thread_logs_in_non_dry_run
+  test_upload_exit_codes_are_disambiguated
 
   printf 'All process_videos control-flow tests passed.\n'
 }

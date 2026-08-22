@@ -120,6 +120,31 @@ audio_sample_rate() {
   ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of csv=p=0 "$media_file"
 }
 
+audio_mean_volume() {
+  local media_file="$1"
+  local start_time="$2"
+  local duration="$3"
+
+  ffmpeg -hide_banner -nostats \
+    -ss "$start_time" -t "$duration" -i "$media_file" \
+    -map 0:a:0 -af volumedetect -f null - 2>&1 |
+    sed -n 's/.*mean_volume: \(-\{0,1\}[0-9.]*\) dB/\1/p' |
+    tail -1
+}
+
+assert_audio_window_audible() {
+  local media_file="$1"
+  local start_time="$2"
+  local duration="$3"
+  local message="$4"
+  local mean_volume
+
+  mean_volume=$(audio_mean_volume "$media_file" "$start_time" "$duration")
+  if [ -z "$mean_volume" ] || ! awk -v level="$mean_volume" 'BEGIN { exit !(level > -50) }'; then
+    fail "$message (mean volume '${mean_volume:-missing}' dB)"
+  fi
+}
+
 video_codec() {
   local media_file="$1"
 
@@ -168,6 +193,23 @@ create_one_stream_segment() {
     -c:v mpeg4 -q:v 5 -pix_fmt yuv420p \
     -c:a aac -b:a 64k \
     -metadata:s:a:0 title=Track1 \
+    "$output_file"
+}
+
+create_delayed_activity_segment() {
+  local output_file="$1"
+
+  ffmpeg -y -loglevel error -hide_banner -nostats \
+    -f lavfi -i "color=c=black:size=64x36:rate=2:duration=9" \
+    -f lavfi -i "aevalsrc=if(between(t\,0.5\,2.5)\,0.2*sin(2*PI*440*t)\,0):s=48000:d=9" \
+    -f lavfi -i "aevalsrc=if(between(t\,3.25\,5.25)\,0.2*sin(2*PI*660*t)\,0):s=48000:d=9" \
+    -f lavfi -i "aevalsrc=if(between(t\,6\,8)\,0.2*sin(2*PI*880*t)\,0):s=48000:d=9" \
+    -map 0:v:0 -map 1:a:0 -map 2:a:0 -map 3:a:0 \
+    -c:v mpeg4 -q:v 12 -pix_fmt yuv420p \
+    -c:a aac -b:a 64k \
+    -metadata:s:a:0 title=Track1 \
+    -metadata:s:a:1 title=Track2 \
+    -metadata:s:a:2 title=Track3 \
     "$output_file"
 }
 
@@ -285,6 +327,56 @@ test_audio_stage_rejects_non_three_stream_layout() {
   assert_contains "Erwartet sind exakt 3 Audio-Streams" "audio stream count error should be clear"
 }
 
+test_audio_stage_uses_independent_track_inputs() {
+  local test_home
+  local fake_bin
+  local fake_ffmpeg
+  local args_log
+  local merged_file
+  test_home=$(new_home)
+  fake_bin="$test_home/fake-bin"
+  fake_ffmpeg="$fake_bin/ffmpeg"
+  args_log="$test_home/ffmpeg-args.txt"
+  merged_file="$test_home/Videos/OBS/final/merged_2099-02-09.mkv"
+
+  create_three_stream_segment "$merged_file"
+  mkdir -p "$fake_bin"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf 'args_log=%q\n' "$args_log"
+    # shellcheck disable=SC2016 # The single-quoted lines are the fake script body.
+    printf '%s\n' \
+      'printf "%s\n" "$@" >"$args_log"' \
+      'for arg in "$@"; do output_file="$arg"; done' \
+      'printf "fake audio" >"$output_file"'
+  } >"$fake_ffmpeg"
+  chmod +x "$fake_ffmpeg"
+
+  run_pipeline_with_path "$test_home" "$fake_bin" -c -e audio 2099-02-09
+  assert_eq 0 "$LAST_STATUS" "audio stage should succeed with the recording opened independently"
+  assert_eq 3 "$(grep -Fxc -- "$merged_file" "$args_log")" "audio stage should open the merged file three times"
+
+  if ! grep -Fq '[0:a:0]' "$args_log" ||
+    ! grep -Fq '[1:a:1]' "$args_log" ||
+    ! grep -Fq '[2:a:2]' "$args_log"; then
+    fail "audio filter should map Discord, Foundry, and microphone from independent inputs"
+  fi
+}
+
+test_delayed_audio_tracks_survive_processing() {
+  local test_home
+  local processed_audio
+  test_home=$(new_home)
+  processed_audio="$test_home/Videos/OBS/final/processed_audio_2099-02-10.m4a"
+
+  create_delayed_activity_segment "$test_home/Videos/OBS/2099-02-10 20-00-00.mkv"
+  run_pipeline "$test_home" -c -e audio 2099-02-10
+  assert_eq 0 "$LAST_STATUS" "audio stage should process tracks that become active at different times"
+  assert_audio_window_audible "$processed_audio" 0.5 2 "Discord window should remain audible"
+  assert_audio_window_audible "$processed_audio" 3.25 2 "delayed Foundry window should remain audible"
+  assert_audio_window_audible "$processed_audio" 6 2 "delayed microphone window should remain audible"
+}
+
 test_failed_video_stage_preserves_existing_output() {
   local test_home
   local fake_bin
@@ -372,6 +464,8 @@ main() {
   test_audio_and_video_stages_create_outputs balanced 2099-02-02 02.02.2099
   test_audio_and_video_stages_create_outputs voice-priority 2099-02-04 04.02.2099
   test_audio_stage_rejects_non_three_stream_layout
+  test_audio_stage_uses_independent_track_inputs
+  test_delayed_audio_tracks_survive_processing
   test_failed_video_stage_preserves_existing_output
   test_invalid_output_target_types_are_rejected
 

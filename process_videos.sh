@@ -470,7 +470,12 @@ run_audio_stage() {
 
   log_msg "Verarbeite Audio von: $MERGED_FILE"
   log_msg "Audio-Mix-Profil: $AUDIO_MIX_PROFILE"
+  # Open the MKV independently for every audio track. Some OBS/Matroska files
+  # lose secondary streams mid-run when several tracks from one demuxer feed
+  # framesync filters such as amix or sidechaincompress.
   "$FFMPEG" "${ffmpeg_common_args[@]}" "${thread_option[@]}" \
+    -i "$MERGED_FILE" \
+    -i "$MERGED_FILE" \
     -i "$MERGED_FILE" \
     -filter_complex "$filter_complex" \
     -map "[final_audio]" \

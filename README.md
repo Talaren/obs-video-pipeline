@@ -34,6 +34,8 @@ The merged file must contain exactly 3 audio streams:
 - `a:1` = Foundry (ambience/music)
 - `a:2` = Own mic voice
 
+During audio processing, the merged MKV is opened independently for each track. This keeps the three decoder/demuxer states isolated and prevents a secondary OBS/Opus track from silently disappearing in long `amix` or `sidechaincompress` runs.
+
 If stream count is not exactly 3, the script exits with an error.
 
 ## Mix Profiles
@@ -58,8 +60,8 @@ The graph topology is identical for both profiles; only parameter intensity chan
 
 ```mermaid
 flowchart LR
-  A0["a:0 Discord"] --> DPROC["Discord voice chain\n(HP/LP, denoise, EQ, dyn norm,\ncompressor, limiter)"]
-  A2["a:2 Own Voice"] --> VPROC["Mic voice chain\n(HP/LP, denoise, EQ, dyn norm,\ncompressor, limiter)"]
+  A0["input 0 · a:0 Discord"] --> DPROC["Discord voice chain\n(HP/LP, denoise, EQ, dyn norm,\ncompressor, limiter)"]
+  A2["input 2 · a:2 Own Voice"] --> VPROC["Mic voice chain\n(HP/LP, denoise, EQ, dyn norm,\ncompressor, limiter)"]
   DPROC --> VMIX["Voices Mix\namix + dyn norm + compressor"]
   VPROC --> VMIX
 
@@ -67,7 +69,7 @@ flowchart LR
   SPLIT -->|main| VMAIN["voices_main"]
   SPLIT -->|sidechain key| VSIDE["voices_side"]
 
-  A1["a:1 Foundry"] --> FPROC["Foundry chain\n(HP/LP, dyn norm, base volume)"]
+  A1["input 1 · a:1 Foundry"] --> FPROC["Foundry chain\n(HP/LP, dyn norm, base volume)"]
   FPROC --> DUCK["sidechaincompress"]
   VSIDE --> DUCK
   DUCK --> FDUCK["foundry_ducked"]

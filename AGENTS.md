@@ -69,6 +69,7 @@
   - `a:1` foundry
   - `a:2` own voice
   - No fallback path for 1/2 streams.
+  - FFmpeg opens the merged MKV independently for each audio track so long OBS/Opus recordings cannot silently lose secondary inputs in multi-input filters.
 - Mix profile:
   - `balanced` (default): clear speech with moderate ducking.
   - `voice-priority`: stronger speech focus and stronger ducking of foundry.

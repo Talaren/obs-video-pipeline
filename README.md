@@ -1,11 +1,13 @@
 # OBS Video Pipeline
 
-Automates post-processing for OBS recordings by date, keeps video stream copy-only, improves voice clarity, and can upload the final video to YouTube as `unlisted`.
+Automates post-processing for OBS recordings by date, improves voice clarity, encodes a YouTube-friendly CPU-x264 final video, and can upload it as `unlisted`.
 
 ## Requirements
 
 - Linux with Bash 4 or newer and GNU userland (`date -d`, `find -print0`, `sort -z`)
-- A recent FFmpeg build providing `ffmpeg`, `ffprobe`, `loudnorm`, `sidechaincompress`, and the AAC encoder
+- `systemd-inhibit` to prevent automatic suspend or hibernation during processing without keeping the displays awake
+- `flock` from util-linux for race-free runtime shutdown control
+- A recent FFmpeg build providing `ffmpeg`, `ffprobe`, `libx264`, `loudnorm`, `sidechaincompress`, and the AAC encoder
 - Enough free space for the merged MKV, processed audio, and final MP4 during a full run
 - Optional desktop/system integration:
   - `notify-send` for `-n`
@@ -17,12 +19,24 @@ Automates post-processing for OBS recordings by date, keeps video stream copy-on
 - Collects `*$DATE*.mkv` from `~/Videos/OBS` in sorted order.
 - Concatenates segments into `merged_YYYY-MM-DD.mkv` (`-c copy`).
 - Processes audio once for the full session into 48-kHz AAC at `processed_audio_YYYY-MM-DD.m4a`.
-- Remuxes final MP4:
+- Encodes the final MP4:
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
-  - Video: `-c:v copy`
-  - Audio: processed AAC track (`-c:a copy` at remux stage)
+  - Video: CPU `libx264`, preset `slow`, CRF 18, source resolution and frame rate
+  - YouTube-oriented H.264 High Profile, 4:2:0, BT.709, two B-frames, closed GOP
+  - Audio: processed 48-kHz AAC track (`-c:a copy` at video stage)
   - `-movflags +faststart`
 - Uploads the final MP4 to YouTube as `unlisted` (optional stage).
+
+Every non-dry-run invocation executes under a blocking `systemd-inhibit` lock for
+`sleep`. This keeps long audio processing, CPU encoding, uploads, and cleanup from
+being paused by automatic suspend or hibernation. Idle behavior is deliberately
+not inhibited, so the screen saver, screen lock, and monitor power saving may
+still activate. Shutdown is also not blocked, so `-s` can power off the computer
+after a successful run.
+
+FFmpeg encoding and YouTube upload progress remain visible in the terminal but
+bypass `full_pipeline_*.log`. Normal status messages, successful upload details,
+warnings, and errors continue to be written to the log.
 
 Media outputs are written to private, owner-writable temporary files in the output directory and replace an existing target only after the corresponding copy, encode, or remux succeeds. Publication then applies the current `umask`; a single-segment copy retains the source permissions masked by `umask`, and replacements preserve the existing target permissions. Existing output targets must be regular files; directories, special files, and symbolic links are rejected.
 
@@ -48,6 +62,23 @@ Set with `-m`, for example:
 ```bash
 ./process_videos.sh -m voice-priority 2026-03-06
 ```
+
+## Video Encoding
+
+The production `video` stage rebuilds the OBS/VAAPI video with CPU `libx264`.
+The defaults favor a high-quality overnight encode and a smaller upload:
+
+- preset `slow`
+- CRF 18 variable-quality encoding without a bitrate cap
+- original resolution and frame rate, forced to constant frame pacing
+- H.264 High Profile, progressive 8-bit `yuv420p`, CABAC, and two B-frames
+- closed GOP with a maximum length of half the frame rate
+- BT.709 limited-range signaling for SDR
+- processed AAC audio copied without another lossy encode
+
+Override preset and CRF for an individual run with `-p` and `-q`. Slower
+presets mainly improve compression efficiency; a smaller CRF increases quality
+and file size. The defaults are the recommended production settings.
 
 ## Audio Filter Graph (`filter_complex`)
 
@@ -139,8 +170,32 @@ All segments selected for concat must have compatible stream layouts, codecs, an
   - `./process_videos.sh -d -e upload 2026-03-06`
 - Set ffmpeg threads:
   - `./process_videos.sh -T 6 2026-03-06`
+- Override CPU encoding for one run:
+  - `./process_videos.sh -p medium -q 20 2026-03-06`
 - Keep intermediate artifacts for inspection or reuse:
   - `./process_videos.sh -c 2026-03-06`
+
+## Runtime Shutdown Control
+
+A pipeline started with `-s` can have its final shutdown changed while audio
+processing, encoding, or uploading is still running. Use the same recording date:
+
+```bash
+# Keep the computer running when the pipeline finishes
+./process_videos.sh -S disable 2026-03-06
+
+# Arm the final shutdown again
+./process_videos.sh -S enable 2026-03-06
+
+# Show the current state and pipeline PID
+./process_videos.sh -S status 2026-03-06
+```
+
+The control state is tied to the active pipeline process and is read again just
+before the final action. It is removed when the pipeline exits. A missing,
+invalid, or stale control state cancels shutdown rather than risking an unwanted
+poweroff. Runtime control is available only for runs originally started with
+`-s`.
 
 ## YouTube Upload Setup (Google API)
 
@@ -226,6 +281,8 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
 | `YOUTUBE_UPLOAD_BIN` | Alternative upload command used by the pipeline | `./yt_upload.sh` |
 | `YT_UPLOAD_PYTHON` | Python executable used by `yt_upload.sh` | `.venv-youtube-upload/bin/python3` |
 | `AUDIO_MIX_PROFILE` | Default mix profile when `-m` is omitted | `balanced` |
+| `VIDEO_X264_PRESET` | Default CPU-x264 preset when `-p` is omitted | `slow` |
+| `VIDEO_X264_CRF` | Default CPU-x264 CRF when `-q` is omitted | `18` |
 
 ## Inputs and Outputs
 
@@ -259,6 +316,8 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
 - `clean` removes current intermediate artifacts for the selected date and legacy shared concat lists, but keeps the final MP4 and logs.
 - `-c` disables cleanup even if `clean` stage is in the list.
 - `-s` triggers shutdown after completion.
+- CPU video encoding can take several hours; shutdown runs only after every selected stage succeeds.
+- Real pipeline runs automatically inhibit suspend and hibernation until completion; screen savers and monitor power saving remain available, and dry-runs do not acquire an inhibitor.
 - `-n` sends a desktop notification after completion.
 - If both `-s` and `-n` are supplied, shutdown takes precedence regardless of option order.
 - Exactly one positional date argument is accepted.

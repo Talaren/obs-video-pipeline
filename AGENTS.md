@@ -18,6 +18,7 @@
 - Run pipeline (default stages: concat,audio,video,clean): `./process_videos.sh 2025-08-28`
 - Select stages: `./process_videos.sh -e concat,audio,video,clean 2025-08-28`
 - Include upload explicitly: `./process_videos.sh -e concat,audio,video,upload,clean 2025-08-28`
+- Change shutdown of a running `-s` pipeline: `./process_videos.sh -S disable|enable|status 2025-08-28`
 - Audio only (auto-concat if merged file is missing): `./process_videos.sh -e audio -m balanced 2025-08-28`
 - Video only (auto-runs audio when processed audio is missing): `./process_videos.sh -e video 2025-08-28`
 - Upload only (requires final MP4 or auto-builds missing prerequisites): `./process_videos.sh -e upload 2025-08-28`
@@ -25,6 +26,7 @@
 - Run dry-run control-flow tests: `./tests/test_process_videos.sh`
 - Run media pipeline smoke tests: `./tests/test_media_pipeline.sh`
 - Set ffmpeg threads: `./process_videos.sh -T 6 2025-08-28`
+- Override x264 settings: `./process_videos.sh -p medium -q 20 2025-08-28`
 - Mix profile: `./process_videos.sh -m voice-priority 2025-08-28`
 - Lint Bash: `shellcheck process_videos.sh`
 - Format Bash: `shfmt -w -i 2 -ci process_videos.sh`
@@ -45,6 +47,7 @@
 - Control-flow tests: run `./tests/test_process_videos.sh` to verify validation, dry-run planning, and auto-stage behavior without processing media.
 - Media smoke tests: run `./tests/test_media_pipeline.sh` to generate tiny MKV fixtures and verify concat/audio/video behavior.
 - Uploader tests: run `.venv-youtube-upload/bin/python3 -m unittest tests/test_yt_upload.py` without contacting YouTube.
+- Video contract: verify H.264 High Profile, `yuv420p`, BT.709, progressive scan, two B-frames, source resolution/frame rate, one copied audio stream, and atomic publication.
 - Audio stream contract: exactly 3 audio streams are required; verify failure message for non-3 stream layouts.
 - Mix profile checks: test both `-m balanced` and `-m voice-priority`.
 - Idempotence: rerun stages; ensure no unexpected overwrites.
@@ -61,8 +64,10 @@
 
 ## Security & Configuration Tips
 - Shutdown/notify: use `-s` (shutdown) and `-n` (notify) carefully; default is no side-effects.
-- Performance: ffmpeg uses stream copy for concat/remux; option `-T` sets threads for ffmpeg calls.
-- Video handling: OBS video is not re-encoded; pipeline does concat/copy to `merged_YYYY-MM-DD.mkv`, then final remux with `-c:v copy -c:a copy -movflags +faststart`.
+- Runtime shutdown control: `-S disable|enable|status DATE` updates or reads the active date-specific `-s` run under `flock`; missing or invalid control state must fail safe without powering off.
+- Sleep inhibition: non-dry-run processing executes through `systemd-inhibit --what=sleep --mode=block`; idle stays uninhibited for screen savers and monitor power saving, and the optional final shutdown is not blocked.
+- Performance: concat uses stream copy; the final video uses CPU/libx264 and can run for several hours. Option `-T` sets threads for ffmpeg calls.
+- Video handling: the production `video` stage encodes CPU/libx264 with default preset `slow`, CRF 18, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.
 - Output safety: media stages keep temporary outputs owner-writable while processing, then atomically publish them; new outputs honor `umask`, replacements preserve target permissions, and non-regular/symlink targets are rejected.
 - Audio processing: runs once on merged session, emits 48-kHz AAC, and expects strict stream mapping:
   - `a:0` discord

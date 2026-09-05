@@ -9,6 +9,7 @@ TEST_TMP_ROOT="$(mktemp -d)"
 SOURCE_FILE="$TEST_TMP_ROOT/source.mkv"
 LAST_OUTPUT=""
 LAST_STATUS=0
+BENCHMARK_TEST_PATH="$PATH"
 
 cleanup() {
   rm -rf -- "$TEST_TMP_ROOT"
@@ -53,7 +54,8 @@ assert_not_contains() {
 
 run_benchmark() {
   set +e
-  LAST_OUTPUT=$(HOME="$TEST_TMP_ROOT" X264_BENCHMARK_INHIBITED=1 "$BENCHMARK_SCRIPT" "$@" 2>&1)
+  LAST_OUTPUT=$(HOME="$TEST_TMP_ROOT" PATH="$BENCHMARK_TEST_PATH" \
+    X264_BENCHMARK_INHIBITED=1 "$BENCHMARK_SCRIPT" "$@" 2>&1)
   LAST_STATUS=$?
   set -e
 }
@@ -99,6 +101,13 @@ run_benchmark -d "$TEST_TMP_ROOT/missing.mkv"
 assert_eq 1 "$LAST_STATUS" "missing source must fail"
 assert_contains "Quelldatei wurde nicht gefunden" "missing source error should be clear"
 
+mkdir "$TEST_TMP_ROOT/fake-bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf " .. libvmaf VV->V\\n"' \
+  >"$TEST_TMP_ROOT/fake-bin/ffmpeg"
+chmod +x "$TEST_TMP_ROOT/fake-bin/ffmpeg"
+BENCHMARK_TEST_PATH="$TEST_TMP_ROOT/fake-bin:$PATH"
 run_benchmark -a 00:00:00 -t 1 -o "$TEST_TMP_ROOT/invalid-source" "$SOURCE_FILE"
 assert_eq 1 "$LAST_STATUS" "invalid media source must fail"
 assert_contains "Videodauer konnte nicht" "invalid media error should identify the failed probe"

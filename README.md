@@ -84,6 +84,43 @@ contract. Slower presets mainly improve compression efficiency; a smaller CRF
 increases quality and file size. The defaults are the recommended production
 settings.
 
+### Benchmarking x264 settings
+
+`benchmark_x264.sh` compares the production settings with alternative x264
+thread, lookahead, preset, and CRF configurations on short excerpts of an
+existing OBS recording. It never changes the source or a production output.
+Each run writes encoded samples plus `results.csv` and `summary.csv` to a new
+result directory. VMAF is measured against the original OBS video. The summary
+also reports CPU use relative to all logical CPUs and estimates the complete
+recording's video-only output size from the samples. The separately processed
+audio track and MP4 container overhead are not included in that estimate.
+
+Preview the default test plan:
+
+```bash
+./benchmark_x264.sh -d "/home/user/Videos/OBS/2026-03-06 19-00-00.mkv"
+```
+
+Run it immediately, or wait for an existing process first:
+
+```bash
+./benchmark_x264.sh "/home/user/Videos/OBS/2026-03-06 19-00-00.mkv"
+./benchmark_x264.sh -w 12345 "/home/user/Videos/OBS/2026-03-06 19-00-00.mkv"
+```
+
+The default `throughput` profile compares thread and preset behavior. The
+`quality` profile compares CRF 18, 20, 21, 22, and 24 with preset `medium`:
+
+```bash
+./benchmark_x264.sh -P quality "/home/user/Videos/OBS/2026-03-06 19-00-00.mkv"
+```
+
+The benchmark automatically inhibits suspend and hibernation while waiting and
+running, without keeping the displays awake. Defaults are three 60-second
+samples at `00:20:00`, `01:20:00`, and `02:30:00`; override them with `-a` and
+`-t`. Do not run the benchmark in parallel with a production encode because
+that would invalidate timing and CPU measurements.
+
 ## Audio Filter Graph (`filter_complex`)
 
 Profile filter files live in `filters/`:

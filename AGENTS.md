@@ -25,6 +25,7 @@
 - Dry-run stage plan without writing files: `./process_videos.sh -d -e upload 2025-08-28`
 - Run dry-run control-flow tests: `./tests/test_process_videos.sh`
 - Run media pipeline smoke tests: `./tests/test_media_pipeline.sh`
+- Run x264 benchmark control-flow tests: `./tests/test_benchmark_x264.sh`
 - Set ffmpeg threads: `./process_videos.sh -T 6 2025-08-28`
 - Override x264 settings: `./process_videos.sh -p medium -q 20 2025-08-28` (presets `superfast` through `placebo`, CRF 1–51)
 - Mix profile: `./process_videos.sh -m voice-priority 2025-08-28`

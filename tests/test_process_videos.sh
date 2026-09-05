@@ -8,8 +8,17 @@ PROCESS_SCRIPT="$REPO_DIR/process_videos.sh"
 TEST_TMP_ROOT="$(mktemp -d)"
 LAST_OUTPUT=""
 LAST_STATUS=0
+BACKGROUND_PID=""
+BACKGROUND_RELEASE_FILE=""
 
 cleanup() {
+  if [ -n "$BACKGROUND_RELEASE_FILE" ]; then
+    : >"$BACKGROUND_RELEASE_FILE"
+  fi
+  if [ -n "$BACKGROUND_PID" ] && kill -0 "$BACKGROUND_PID" 2>/dev/null; then
+    kill "$BACKGROUND_PID" 2>/dev/null || true
+    wait "$BACKGROUND_PID" 2>/dev/null || true
+  fi
   if [ -n "$TEST_TMP_ROOT" ] && [ -d "$TEST_TMP_ROOT" ]; then
     rm -rf "$TEST_TMP_ROOT"
   fi
@@ -346,6 +355,174 @@ test_dry_run_upload_with_final_artifact() {
   assert_not_contains "Auto-Stage:" "no auto-stage should be reported when final exists"
 }
 
+test_timestamp_freshness_autostages_dependencies() {
+  local test_home
+  local source_file
+  local merged_file
+  local processed_audio
+  local final_file
+  local date
+  test_home=$(new_home)
+  date=2099-01-06
+  source_file="$test_home/Videos/OBS/$date 20-00-00.mkv"
+  merged_file="$test_home/Videos/OBS/final/merged_${date}.mkv"
+  processed_audio="$test_home/Videos/OBS/final/processed_audio_${date}.m4a"
+  final_file="$test_home/Videos/OBS/final/DSA5 mit Marth 06.01.2099 final.mp4"
+
+  : >"$source_file"
+  : >"$final_file"
+  touch -d '2035-01-01 00:00:00' "$source_file"
+  touch -d '2035-01-01 00:04:00' "$final_file"
+
+  run_pipeline "$test_home" -d -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "upload dry-run should accept a final file newer than cleaned prerequisites"
+  assert_contains "Geplante Stages: upload" "fresh final file should remain directly uploadable after cleanup"
+  assert_not_contains "Auto-Stage:" "cleaned intermediate files alone must not make a fresh final file stale"
+
+  touch -d '2035-01-01 00:05:00' "$source_file"
+  run_pipeline "$test_home" -d -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "upload dry-run should rebuild a final file older than an OBS source"
+  assert_contains "Geplante Stages: concat,audio,video,upload" \
+    "newer OBS source should rebuild all missing prerequisites"
+  assert_contains "Auto-Stage: video, weil mindestens eine OBS-Quelldatei neuer" \
+    "stale final file should explain the newer OBS source"
+
+  : >"$merged_file"
+  : >"$processed_audio"
+  touch -d '2035-01-01 00:01:00' "$source_file"
+  touch -d '2035-01-01 00:05:00' "$processed_audio"
+  touch -d '2035-01-01 00:06:00' "$final_file"
+  touch -d '2035-01-01 00:07:00' "$merged_file"
+
+  run_pipeline "$test_home" -d -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "upload dry-run should follow stale intermediate dependencies"
+  assert_contains "Geplante Stages: audio,video,upload" \
+    "newer merged file should rebuild audio and video without rebuilding concat"
+  assert_not_contains "Auto-Stage: concat" "fresh merged file should not be rebuilt"
+  assert_contains "Auto-Stage: audio, weil $merged_file neuer" \
+    "stale processed audio should identify the newer merged file"
+  assert_contains "Auto-Stage: video, weil $merged_file neuer" \
+    "stale final file should identify the newer merged file"
+
+  touch -d '2035-01-01 00:08:00' "$source_file"
+  run_pipeline "$test_home" -d -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "newest OBS source should invalidate the complete dependency chain"
+  assert_contains "Geplante Stages: concat,audio,video,upload" \
+    "newest OBS source should rebuild concat, audio, and video"
+  assert_contains "Auto-Stage: concat, weil mindestens eine OBS-Quelldatei neuer" \
+    "stale merged file should explain the newer OBS source"
+  assert_contains "Auto-Stage: audio, weil mindestens eine OBS-Quelldatei neuer" \
+    "stale audio file should explain the newer OBS source"
+}
+
+test_pipeline_lock_is_per_date() {
+  local test_home
+  local fake_uploader
+  local quick_uploader
+  local ready_file
+  local release_file
+  local first_output
+  local first_status
+  local lock_file
+  local attempt
+  local date
+  test_home=$(new_home)
+  fake_uploader="$test_home/blocking-uploader"
+  quick_uploader="$test_home/quick-uploader"
+  ready_file="$test_home/uploader-ready"
+  release_file="$test_home/uploader-release"
+  first_output="$test_home/first-pipeline.log"
+  date=2099-01-07
+  lock_file="$test_home/Videos/OBS/final/.pipeline_${date}.lock"
+  : >"$test_home/Videos/OBS/final/DSA5 mit Marth 07.01.2099 final.mp4"
+
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    ': "${LOCK_READY_FILE:?}" "${LOCK_RELEASE_FILE:?}"' \
+    ': >"$LOCK_READY_FILE"' \
+    'while [ ! -e "$LOCK_RELEASE_FILE" ]; do sleep 0.05; done' >"$fake_uploader"
+  chmod +x "$fake_uploader"
+
+  BACKGROUND_RELEASE_FILE="$release_file"
+  HOME="$test_home" \
+    OBS_VIDEO_PIPELINE_INHIBITED=1 \
+    YOUTUBE_UPLOAD_BIN="$fake_uploader" \
+    LOCK_READY_FILE="$ready_file" \
+    LOCK_RELEASE_FILE="$release_file" \
+    "$PROCESS_SCRIPT" -e upload "$date" >"$first_output" 2>&1 &
+  BACKGROUND_PID=$!
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [ -e "$ready_file" ] && break
+    sleep 0.05
+  done
+  if [ ! -e "$ready_file" ]; then
+    fail "first pipeline did not reach its blocking uploader"
+  fi
+
+  run_pipeline_with_uploader "$test_home" "$fake_uploader" -e upload "$date"
+  assert_eq 75 "$LAST_STATUS" "second pipeline for the same date should fail with the lock conflict status"
+  assert_contains "laeuft bereits eine Video-Pipeline" "same-date lock conflict should be explained"
+
+  run_pipeline "$test_home" -e clean 2099-01-08
+  assert_eq 0 "$LAST_STATUS" "a pipeline for another date should run while the first date is locked"
+
+  run_pipeline "$test_home" -d -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "dry-run should remain available while the real pipeline is locked"
+
+  : >"$release_file"
+  set +e
+  wait "$BACKGROUND_PID"
+  first_status=$?
+  set -e
+  BACKGROUND_PID=""
+  BACKGROUND_RELEASE_FILE=""
+  assert_eq 0 "$first_status" "first locked pipeline should finish normally after release"
+
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$quick_uploader"
+  chmod +x "$quick_uploader"
+  run_pipeline_with_uploader "$test_home" "$quick_uploader" -e upload "$date"
+  assert_eq 0 "$LAST_STATUS" "same-date lock should be released after the pipeline exits"
+
+  if [ ! -f "$lock_file" ]; then
+    fail "pipeline lock should use a persistent regular lock file"
+  fi
+  assert_eq 600 "$(stat -c '%a' "$lock_file")" "new pipeline lock file should be private"
+}
+
+test_invalid_pipeline_lock_targets_are_rejected() {
+  local test_home
+  local lock_file
+  local symlink_target
+  local date
+  test_home=$(new_home)
+  date=2099-01-09
+  lock_file="$test_home/Videos/OBS/final/.pipeline_${date}.lock"
+  symlink_target="$test_home/lock-target"
+  : >"$symlink_target"
+  ln -s "$symlink_target" "$lock_file"
+
+  run_pipeline "$test_home" -e clean "$date"
+  assert_eq 1 "$LAST_STATUS" "symbolic-link pipeline lock target should be rejected"
+  assert_contains "Pipeline-Sperrdatei ist keine regulaere Datei" \
+    "symbolic-link pipeline lock error should be explicit"
+  if [ ! -L "$lock_file" ] || [ ! -f "$symlink_target" ]; then
+    fail "rejected symbolic-link pipeline lock target should remain untouched"
+  fi
+
+  rm "$lock_file"
+  mkdir "$lock_file"
+  run_pipeline "$test_home" -e clean "$date"
+  assert_eq 1 "$LAST_STATUS" "directory pipeline lock target should be rejected"
+  assert_contains "Pipeline-Sperrdatei ist keine regulaere Datei" \
+    "directory pipeline lock error should be explicit"
+  if [ ! -d "$lock_file" ]; then
+    fail "rejected directory pipeline lock target should remain untouched"
+  fi
+}
+
 test_dry_run_clean_disabled_by_c_flag() {
   local test_home
   test_home=$(new_home)
@@ -430,6 +607,13 @@ test_upload_exit_codes_are_disambiguated() {
   assert_eq 2 "$LAST_STATUS" "argparse-style failures should retain exit status 2"
   assert_not_contains "Playlist-Zuordnung ist fehlgeschlagen" "argparse failure must not claim a completed upload"
   assert_contains "Skript unerwartet beendet" "argparse failure should follow the normal error path"
+
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 75' >"$uploader"
+
+  run_pipeline_with_uploader "$test_home" "$uploader" -e upload 2099-01-01
+  assert_eq 75 "$LAST_STATUS" "uploader status 75 should pass through the pipeline"
+  assert_not_contains "laeuft bereits eine Video-Pipeline" \
+    "child status 75 must not be misreported as a pipeline lock conflict"
 }
 
 test_upload_progress_bypasses_pipeline_log() {
@@ -475,12 +659,15 @@ main() {
   test_dry_run_upload_autostages_without_artifacts
   test_dry_run_video_autostages_without_artifacts
   test_dry_run_upload_with_final_artifact
+  test_timestamp_freshness_autostages_dependencies
   test_dry_run_clean_disabled_by_c_flag
   test_dry_run_finish_actions
   test_dry_run_does_not_write_output_dir
   test_non_dry_run_uses_sleep_inhibitor
   test_dry_run_skips_sleep_inhibitor
   test_runtime_shutdown_control
+  test_pipeline_lock_is_per_date
+  test_invalid_pipeline_lock_targets_are_rejected
   test_invalid_thread_logs_in_non_dry_run
   test_upload_exit_codes_are_disambiguated
   test_upload_progress_bypasses_pipeline_log

@@ -13,6 +13,8 @@ SHUTDOWN_CONTROL_FILE=""
 SHUTDOWN_CONTROL_OWNED=false
 SHUTDOWN_CONTROL_PID=""
 SHUTDOWN_CONTROL_STATE=""
+PIPELINE_LOCK_FILE=""
+PIPELINE_LOCK_CONFLICT_STATUS=75
 STAGES=""
 FFMPEG_THREADS=""
 FFMPEG="ffmpeg"
@@ -277,6 +279,7 @@ PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
 FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
 SHUTDOWN_CONTROL_FILE="$OUTPUT_DIR/.shutdown_${DATE}.control"
+PIPELINE_LOCK_FILE="$OUTPUT_DIR/.pipeline_${DATE}.lock"
 
 if [ -n "$SHUTDOWN_CONTROL_ACTION" ]; then
   case "$SHUTDOWN_CONTROL_ACTION" in
@@ -348,9 +351,49 @@ fi
 
 if [ "$DRY_RUN" = false ]; then
   mkdir -p "$OUTPUT_DIR"
+
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "Fehler: Benoetigtes Kommando 'flock' wurde nicht gefunden." >&2
+    exit 1
+  fi
+  if ! command -v stat >/dev/null 2>&1; then
+    echo "Fehler: Benoetigtes Kommando 'stat' wurde nicht gefunden." >&2
+    exit 1
+  fi
+  if [ -L "$PIPELINE_LOCK_FILE" ] || { [ -e "$PIPELINE_LOCK_FILE" ] && [ ! -f "$PIPELINE_LOCK_FILE" ]; }; then
+    echo "Fehler: Pipeline-Sperrdatei ist keine regulaere Datei ($PIPELINE_LOCK_FILE)." >&2
+    exit 1
+  fi
+
+  if [ ! -e "$PIPELINE_LOCK_FILE" ]; then
+    if ! (umask 077 && set -o noclobber && : >"$PIPELINE_LOCK_FILE") 2>/dev/null; then
+      if [ -L "$PIPELINE_LOCK_FILE" ] || [ ! -f "$PIPELINE_LOCK_FILE" ]; then
+        echo "Fehler: Pipeline-Sperrdatei konnte nicht sicher erstellt werden ($PIPELINE_LOCK_FILE)." >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  if ! { exec 8>>"$PIPELINE_LOCK_FILE"; } 2>/dev/null; then
+    echo "Fehler: Pipeline-Sperrdatei konnte nicht geoeffnet werden ($PIPELINE_LOCK_FILE)." >&2
+    exit 1
+  fi
+  if [ -L "$PIPELINE_LOCK_FILE" ] || [ ! -f "$PIPELINE_LOCK_FILE" ] ||
+    [ "$(stat -Lc '%d:%i' "$PIPELINE_LOCK_FILE")" != "$(stat -Lc '%d:%i' "/proc/$$/fd/8")" ]; then
+    exec 8>&-
+    echo "Fehler: Pipeline-Sperrdatei wurde waehrend des Oeffnens veraendert ($PIPELINE_LOCK_FILE)." >&2
+    exit 1
+  fi
+
+  if ! flock --exclusive --nonblock 8; then
+    exec 8>&-
+    printf 'Fehler: Fuer %s laeuft bereits eine Video-Pipeline.\n' "$DATE" >&2
+    exit "$PIPELINE_LOCK_CONFLICT_STATUS"
+  fi
+
   LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
   exec 3>&1
-  exec > >(tee -i "$LOG_FILE") 2>&1
+  exec > >(tee -i "$LOG_FILE" 8>&-) 2>&1
 
   log_msg "Starte Prozess fuer Datum: $DATE"
   if [ "$SLEEP_INHIBIT_ACTIVE" = true ]; then
@@ -392,6 +435,23 @@ stage_enabled() {
   return 1
 }
 
+recording_is_newer_than() {
+  local reference_file="$1"
+  local newer_recording
+
+  if [ ! -f "$reference_file" ] || [ ! -d "$VIDEO_DIR" ]; then
+    return 1
+  fi
+
+  if ! newer_recording=$(find "$VIDEO_DIR" -maxdepth 1 -type f -name "*$DATE*.mkv" \
+    -newer "$reference_file" -print -quit); then
+    log_msg "Fehler: OBS-Quelldateien fuer die Frischepruefung konnten nicht gelesen werden."
+    exit 1
+  fi
+
+  [ -n "$newer_recording" ]
+}
+
 run_concat=false
 run_audio=false
 run_video=false
@@ -421,17 +481,47 @@ fi
 explicit_concat=$run_concat
 explicit_audio=$run_audio
 explicit_video=$run_video
+concat_auto_reason=""
+audio_auto_reason=""
+video_auto_reason=""
 
-if $run_upload && [ ! -f "$OUTPUT_FILE" ]; then
-  run_video=true
+if $run_upload; then
+  if [ ! -f "$OUTPUT_FILE" ]; then
+    run_video=true
+    video_auto_reason="$OUTPUT_FILE fehlt"
+  elif recording_is_newer_than "$OUTPUT_FILE"; then
+    run_video=true
+    video_auto_reason="mindestens eine OBS-Quelldatei neuer als $OUTPUT_FILE ist"
+  elif [ -f "$PROCESSED_AUDIO" ] && [ "$PROCESSED_AUDIO" -nt "$OUTPUT_FILE" ]; then
+    run_video=true
+    video_auto_reason="$PROCESSED_AUDIO neuer als $OUTPUT_FILE ist"
+  elif [ -f "$MERGED_FILE" ] && [ "$MERGED_FILE" -nt "$OUTPUT_FILE" ]; then
+    run_video=true
+    video_auto_reason="$MERGED_FILE neuer als $OUTPUT_FILE ist"
+  fi
 fi
 
-if $run_video && [ ! -f "$PROCESSED_AUDIO" ]; then
-  run_audio=true
+if $run_video; then
+  if [ ! -f "$PROCESSED_AUDIO" ]; then
+    run_audio=true
+    audio_auto_reason="$PROCESSED_AUDIO fehlt"
+  elif recording_is_newer_than "$PROCESSED_AUDIO"; then
+    run_audio=true
+    audio_auto_reason="mindestens eine OBS-Quelldatei neuer als $PROCESSED_AUDIO ist"
+  elif [ -f "$MERGED_FILE" ] && [ "$MERGED_FILE" -nt "$PROCESSED_AUDIO" ]; then
+    run_audio=true
+    audio_auto_reason="$MERGED_FILE neuer als $PROCESSED_AUDIO ist"
+  fi
 fi
 
-if { $run_audio || $run_video; } && [ ! -f "$MERGED_FILE" ]; then
-  run_concat=true
+if $run_audio || $run_video; then
+  if [ ! -f "$MERGED_FILE" ]; then
+    run_concat=true
+    concat_auto_reason="$MERGED_FILE fehlt"
+  elif recording_is_newer_than "$MERGED_FILE"; then
+    run_concat=true
+    concat_auto_reason="mindestens eine OBS-Quelldatei neuer als $MERGED_FILE ist"
+  fi
 fi
 
 normalized_mix_profile="${AUDIO_MIX_PROFILE,,}"
@@ -502,13 +592,13 @@ if [ "$DRY_RUN" = true ]; then
     printf 'Geplante Stages: keine\n'
   fi
   if $run_concat && ! $explicit_concat; then
-    printf 'Auto-Stage: concat, weil %s fehlt\n' "$MERGED_FILE"
+    printf 'Auto-Stage: concat, weil %s\n' "$concat_auto_reason"
   fi
   if $run_audio && ! $explicit_audio; then
-    printf 'Auto-Stage: audio, weil %s fehlt\n' "$PROCESSED_AUDIO"
+    printf 'Auto-Stage: audio, weil %s\n' "$audio_auto_reason"
   fi
   if $run_video && ! $explicit_video; then
-    printf 'Auto-Stage: video, weil %s fehlt\n' "$OUTPUT_FILE"
+    printf 'Auto-Stage: video, weil %s\n' "$video_auto_reason"
   fi
   printf 'Mix-Profil: %s\n' "$AUDIO_MIX_PROFILE"
   printf 'Video-Encoding: libx264, preset=%s, crf=%s\n' "$VIDEO_X264_PRESET" "$VIDEO_X264_CRF"
@@ -922,7 +1012,7 @@ fi
 
 if $run_concat; then
   if ! $explicit_concat; then
-    log_msg "Merged-Datei fehlt ($MERGED_FILE). Starte Concat automatisch."
+    log_msg "Starte Concat automatisch, weil $concat_auto_reason."
   fi
   run_concat_stage
 else
@@ -931,7 +1021,7 @@ fi
 
 if $run_audio; then
   if ! $explicit_audio; then
-    log_msg "Audiodatei fehlt ($PROCESSED_AUDIO). Starte Audio-Schritt automatisch."
+    log_msg "Starte Audio-Schritt automatisch, weil $audio_auto_reason."
   fi
   run_audio_stage
 else
@@ -940,7 +1030,7 @@ fi
 
 if $run_video; then
   if ! $explicit_video; then
-    log_msg "Finale Datei fehlt ($OUTPUT_FILE). Starte Video-Schritt automatisch."
+    log_msg "Starte Video-Schritt automatisch, weil $video_auto_reason."
   fi
   run_video_stage
 else

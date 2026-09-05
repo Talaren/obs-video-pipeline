@@ -13,6 +13,7 @@
   - Processed audio: `processed_audio_YYYY-MM-DD.m4a`
   - Concat list: `filelist_mkv_YYYY-MM-DD.txt` (only with multiple segments)
   - Final: `DSA5 mit Marth DD.MM.YYYY final.mp4`
+  - Per-date lock file: `.pipeline_YYYY-MM-DD.lock` (persistent, negligible size)
 
 ## Build, Test, and Development Commands
 - Run pipeline (default stages: concat,audio,video,clean): `./process_videos.sh 2025-08-28`
@@ -53,9 +54,10 @@
 - Mix profile checks: test both `-m balanced` and `-m voice-priority`.
 - Idempotence: rerun stages; ensure no unexpected overwrites.
 - Dependency behavior:
-  - `-e audio` and `-e video` auto-run concat when `merged_YYYY-MM-DD.mkv` is absent.
-  - `-e video` auto-runs audio when processed audio is missing.
-  - `-e upload` auto-builds missing prerequisites up to final MP4.
+  - `-e audio` and `-e video` auto-run concat when `merged_YYYY-MM-DD.mkv` is absent or older than a matching OBS source.
+  - `-e video` auto-runs audio when processed audio is missing or older than its available inputs.
+  - `-e upload` auto-builds missing or stale prerequisites up to the final MP4; a fresh final MP4 remains uploadable after cleanup removed intermediates.
+- Concurrency behavior: a second real pipeline for the same date exits with status 75; different dates, dry-runs, and `-S` control calls remain available.
 - Upload behavior: verify clear error when OAuth client secrets are missing.
 - Linting: `shellcheck` must pass with no errors; fix warnings when feasible.
 
@@ -66,6 +68,7 @@
 ## Security & Configuration Tips
 - Shutdown/notify: use `-s` (shutdown) and `-n` (notify) carefully; default is no side-effects.
 - Runtime shutdown control: `-S disable|enable|status DATE` updates or reads the active date-specific `-s` run under `flock`; missing or invalid control state must fail safe without powering off.
+- Pipeline locking: every non-dry-run workflow holds a per-date `flock` through `.pipeline_YYYY-MM-DD.lock`; the persistent file must remain a regular non-symlink file and must not be removed during a run.
 - Sleep inhibition: non-dry-run processing executes through `systemd-inhibit --what=sleep --mode=block`; idle stays uninhibited for screen savers and monitor power saving, and the optional final shutdown is not blocked.
 - Performance: concat uses stream copy; the final video uses CPU/libx264 and can run for several hours. Option `-T` sets threads for ffmpeg calls.
 - Video handling: the production `video` stage encodes CPU/libx264 with default preset `medium`, CRF 21, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.

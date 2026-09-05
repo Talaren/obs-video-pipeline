@@ -68,7 +68,7 @@
 - Runtime shutdown control: `-S disable|enable|status DATE` updates or reads the active date-specific `-s` run under `flock`; missing or invalid control state must fail safe without powering off.
 - Sleep inhibition: non-dry-run processing executes through `systemd-inhibit --what=sleep --mode=block`; idle stays uninhibited for screen savers and monitor power saving, and the optional final shutdown is not blocked.
 - Performance: concat uses stream copy; the final video uses CPU/libx264 and can run for several hours. Option `-T` sets threads for ffmpeg calls.
-- Video handling: the production `video` stage encodes CPU/libx264 with default preset `slow`, CRF 18, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.
+- Video handling: the production `video` stage encodes CPU/libx264 with default preset `medium`, CRF 21, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.
 - Output safety: media stages keep temporary outputs owner-writable while processing, then atomically publish them; new outputs honor `umask`, replacements preserve target mode, ownership/group, access ACL, and extended attributes, and non-regular/symlink targets are rejected.
 - Audio processing: runs once on merged session, emits 48-kHz AAC, and expects strict stream mapping:
   - `a:0` discord

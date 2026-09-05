@@ -19,8 +19,8 @@ FFMPEG="ffmpeg"
 SYSTEMD_INHIBIT_BIN="${SYSTEMD_INHIBIT_BIN:-systemd-inhibit}"
 SLEEP_INHIBIT_ACTIVE=false
 AUDIO_MIX_PROFILE="${AUDIO_MIX_PROFILE:-balanced}"
-VIDEO_X264_PRESET="${VIDEO_X264_PRESET:-slow}"
-VIDEO_X264_CRF="${VIDEO_X264_CRF:-18}"
+VIDEO_X264_PRESET="${VIDEO_X264_PRESET:-medium}"
+VIDEO_X264_CRF="${VIDEO_X264_CRF:-21}"
 YOUTUBE_UPLOAD_BIN="${YOUTUBE_UPLOAD_BIN:-$SCRIPT_DIR/yt_upload.sh}"
 YOUTUBE_UPLOAD_PRIVACY="unlisted"
 YOUTUBE_UPLOAD_DESCRIPTION="${YOUTUBE_UPLOAD_DESCRIPTION:-Archivaufnahme einer DSA5-Runde.}"
@@ -167,8 +167,8 @@ Optionen:
                  (Wenn -e nicht gesetzt ist: concat,audio,video,clean)
   -T THREADS     Anzahl Threads pro ffmpeg-Prozess (setzt -threads bei ffmpeg-Aufrufen)
   -m PROFILE     Audio-Mix-Profil: balanced (Default) oder voice-priority
-  -p PRESET      libx264-Preset fuer Video (superfast bis placebo; Standard: slow)
-  -q CRF         libx264-Qualitaet 1-51 (Standard: 18; kleiner = hoehere Qualitaet)
+  -p PRESET      libx264-Preset fuer Video (superfast bis placebo; Standard: medium)
+  -q CRF         libx264-Qualitaet 1-51 (Standard: 21; kleiner = hoehere Qualitaet)
   -h             Hilfe
 
 Audio-Annahme (ohne Fallback):

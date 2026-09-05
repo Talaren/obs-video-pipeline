@@ -21,7 +21,7 @@ Automates post-processing for OBS recordings by date, improves voice clarity, en
 - Processes audio once for the full session into 48-kHz AAC at `processed_audio_YYYY-MM-DD.m4a`.
 - Encodes the final MP4:
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
-  - Video: CPU `libx264`, preset `slow`, CRF 18, source resolution and frame rate
+  - Video: CPU `libx264`, preset `medium`, CRF 21, source resolution and frame rate
   - YouTube-oriented H.264 High Profile, 4:2:0, BT.709, two B-frames, closed GOP
   - Audio: processed 48-kHz AAC track (`-c:a copy` at video stage)
   - `-movflags +faststart`
@@ -68,8 +68,8 @@ Set with `-m`, for example:
 The production `video` stage rebuilds the OBS/VAAPI video with CPU `libx264`.
 The defaults favor a high-quality overnight encode and a smaller upload:
 
-- preset `slow`
-- CRF 18 variable-quality encoding without a bitrate cap
+- preset `medium`
+- CRF 21 variable-quality encoding without a bitrate cap
 - original resolution and frame rate, forced to constant frame pacing
 - H.264 High Profile, progressive 8-bit `yuv420p`, CABAC, and two B-frames
 - closed GOP with a maximum length of half the frame rate
@@ -322,8 +322,8 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
 | `YOUTUBE_UPLOAD_BIN` | Alternative upload command used by the pipeline | `./yt_upload.sh` |
 | `YT_UPLOAD_PYTHON` | Python executable used by `yt_upload.sh` | `.venv-youtube-upload/bin/python3` |
 | `AUDIO_MIX_PROFILE` | Default mix profile when `-m` is omitted | `balanced` |
-| `VIDEO_X264_PRESET` | Default CPU-x264 preset when `-p` is omitted | `slow` |
-| `VIDEO_X264_CRF` | Default CPU-x264 CRF when `-q` is omitted | `18` |
+| `VIDEO_X264_PRESET` | Default CPU-x264 preset when `-p` is omitted | `medium` |
+| `VIDEO_X264_CRF` | Default CPU-x264 CRF when `-q` is omitted | `21` |
 
 ## Inputs and Outputs
 

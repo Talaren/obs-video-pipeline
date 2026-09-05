@@ -322,7 +322,7 @@ test_dry_run_video_autostages_without_artifacts() {
   assert_contains "Auto-Stage: concat" "concat auto-stage should be explained"
   assert_contains "Auto-Stage: audio" "audio auto-stage should be explained"
   assert_not_contains "Auto-Stage: video" "explicit video should not be reported as auto-stage"
-  assert_contains "Video-Encoding: libx264, preset=slow, crf=18" "dry-run should show production x264 defaults"
+  assert_contains "Video-Encoding: libx264, preset=medium, crf=21" "dry-run should show production x264 defaults"
 
   run_pipeline "$test_home" -d -e video -p medium -q 20 2099-01-01
   assert_eq 0 "$LAST_STATUS" "custom valid x264 settings should pass dry-run"

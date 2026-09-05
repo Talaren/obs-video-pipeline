@@ -26,7 +26,7 @@
 - Run dry-run control-flow tests: `./tests/test_process_videos.sh`
 - Run media pipeline smoke tests: `./tests/test_media_pipeline.sh`
 - Set ffmpeg threads: `./process_videos.sh -T 6 2025-08-28`
-- Override x264 settings: `./process_videos.sh -p medium -q 20 2025-08-28`
+- Override x264 settings: `./process_videos.sh -p medium -q 20 2025-08-28` (presets `superfast` through `placebo`, CRF 1–51)
 - Mix profile: `./process_videos.sh -m voice-priority 2025-08-28`
 - Lint Bash: `shellcheck process_videos.sh`
 - Format Bash: `shfmt -w -i 2 -ci process_videos.sh`
@@ -47,7 +47,7 @@
 - Control-flow tests: run `./tests/test_process_videos.sh` to verify validation, dry-run planning, and auto-stage behavior without processing media.
 - Media smoke tests: run `./tests/test_media_pipeline.sh` to generate tiny MKV fixtures and verify concat/audio/video behavior.
 - Uploader tests: run `.venv-youtube-upload/bin/python3 -m unittest tests/test_yt_upload.py` without contacting YouTube.
-- Video contract: verify H.264 High Profile, `yuv420p`, BT.709, progressive scan, two B-frames, source resolution/frame rate, one copied audio stream, and atomic publication.
+- Video contract: verify H.264 High Profile, `yuv420p`, BT.709, progressive scan, two B-frames, source resolution/frame rate, one copied audio stream, and atomic publication. Reject `ultrafast` and CRF 0 before encoding because they cannot satisfy the contract.
 - Audio stream contract: exactly 3 audio streams are required; verify failure message for non-3 stream layouts.
 - Mix profile checks: test both `-m balanced` and `-m voice-priority`.
 - Idempotence: rerun stages; ensure no unexpected overwrites.
@@ -68,7 +68,7 @@
 - Sleep inhibition: non-dry-run processing executes through `systemd-inhibit --what=sleep --mode=block`; idle stays uninhibited for screen savers and monitor power saving, and the optional final shutdown is not blocked.
 - Performance: concat uses stream copy; the final video uses CPU/libx264 and can run for several hours. Option `-T` sets threads for ffmpeg calls.
 - Video handling: the production `video` stage encodes CPU/libx264 with default preset `slow`, CRF 18, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.
-- Output safety: media stages keep temporary outputs owner-writable while processing, then atomically publish them; new outputs honor `umask`, replacements preserve target permissions, and non-regular/symlink targets are rejected.
+- Output safety: media stages keep temporary outputs owner-writable while processing, then atomically publish them; new outputs honor `umask`, replacements preserve target mode, ownership/group, access ACL, and extended attributes, and non-regular/symlink targets are rejected.
 - Audio processing: runs once on merged session, emits 48-kHz AAC, and expects strict stream mapping:
   - `a:0` discord
   - `a:1` foundry
@@ -86,7 +86,7 @@
   - Base scope is `youtube.upload`; playlist insertion requires an additional YouTube scope.
   - `YOUTUBE_UPLOAD_TAGS` sets comma-separated tags.
   - `YOUTUBE_UPLOAD_PLAYLIST_ID` adds uploaded video to a playlist.
-  - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets insertion index in that playlist.
+  - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets a zero-based uint32 insertion index in that playlist and is validated before upload.
   - Extra uploader args are passed via newline-separated `YOUTUBE_UPLOAD_EXTRA_ARGS`.
 - Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv_YYYY-MM-DD.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`, `filelist_mkv.txt`).
 

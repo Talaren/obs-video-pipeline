@@ -12,7 +12,7 @@ Review for correctness and safety first, style second.
 
 ## Repository-Specific Rules
 - `process_videos.sh` is a concat/audio/CPU-video workflow:
-  - Keep stage model: `concat,audio,video,clean`.
+  - Keep stage model: `concat,audio,video,upload,clean`.
   - Keep final video on CPU/libx264 with preset `slow` and CRF 18 defaults.
   - Preserve source resolution/frame rate and YouTube-oriented H.264 properties:
     High Profile, `yuv420p`, progressive, two B-frames, closed GOP, BT.709.

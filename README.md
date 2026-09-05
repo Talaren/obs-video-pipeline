@@ -38,7 +38,7 @@ FFmpeg encoding and YouTube upload progress remain visible in the terminal but
 bypass `full_pipeline_*.log`. Normal status messages, successful upload details,
 warnings, and errors continue to be written to the log.
 
-Media outputs are written to private, owner-writable temporary files in the output directory and replace an existing target only after the corresponding copy, encode, or remux succeeds. Publication then applies the current `umask`; a single-segment copy retains the source permissions masked by `umask`, and replacements preserve the existing target permissions. Existing output targets must be regular files; directories, special files, and symbolic links are rejected.
+Media outputs are written to private, owner-writable temporary files in the output directory and replace an existing target only after the corresponding copy, encode, or remux succeeds. Publication then applies the current `umask`; a single-segment copy retains the source permissions masked by `umask`, and replacements preserve the existing target mode, ownership/group, access ACL, and extended attributes. Existing output targets must be regular files; directories, special files, and symbolic links are rejected. If existing metadata cannot be preserved, publication fails and leaves the old target untouched.
 
 ## Audio Model (Strict, No Fallback)
 
@@ -76,9 +76,13 @@ The defaults favor a high-quality overnight encode and a smaller upload:
 - BT.709 limited-range signaling for SDR
 - processed AAC audio copied without another lossy encode
 
-Override preset and CRF for an individual run with `-p` and `-q`. Slower
-presets mainly improve compression efficiency; a smaller CRF increases quality
-and file size. The defaults are the recommended production settings.
+Override preset and CRF for an individual run with `-p` and `-q`. Supported
+presets range from `superfast` through `placebo`; `ultrafast` is excluded because
+it does not satisfy the enforced H.264 High Profile contract. CRF must be an
+integer from 1 through 51 because lossless CRF 0 is incompatible with that
+contract. Slower presets mainly improve compression efficiency; a smaller CRF
+increases quality and file size. The defaults are the recommended production
+settings.
 
 ## Audio Filter Graph (`filter_complex`)
 
@@ -267,7 +271,7 @@ Scope behavior:
 - Upload without playlist requests only `youtube.upload`.
 - If `--playlist-id` / `YOUTUBE_UPLOAD_PLAYLIST_ID` is used, uploader requests an additional YouTube scope and may ask for OAuth consent again.
 
-Uploads use resumable chunks and retry temporary network and HTTP 5xx failures with exponential backoff. If the video upload succeeds but playlist insertion fails, the uploader exits with the dedicated status `3` and prints the existing video ID. Status `2` remains available for command-line parsing errors. Do not rerun the complete upload after status `3`.
+Uploads use resumable chunks and retry temporary network and HTTP 5xx failures with exponential backoff. Playlist positions are validated as zero-based unsigned 32-bit values before upload. If the video upload succeeds but playlist insertion fails, the uploader exits with the dedicated status `3` and prints the existing video ID. Status `2` remains available for command-line parsing errors. Do not rerun the complete upload after status `3`.
 
 ### Upload configuration
 
@@ -276,7 +280,7 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
 | `YOUTUBE_UPLOAD_DESCRIPTION` | Video description | `Archivaufnahme einer DSA5-Runde.` |
 | `YOUTUBE_UPLOAD_TAGS` | Comma-separated tags | empty |
 | `YOUTUBE_UPLOAD_PLAYLIST_ID` | Playlist receiving the uploaded video | empty |
-| `YOUTUBE_UPLOAD_PLAYLIST_POSITION` | Optional playlist insertion index | empty |
+| `YOUTUBE_UPLOAD_PLAYLIST_POSITION` | Optional zero-based playlist insertion index (`0`–`4294967295`) | empty |
 | `YOUTUBE_UPLOAD_EXTRA_ARGS` | Newline-separated arguments for `yt_upload.py` | empty |
 | `YOUTUBE_UPLOAD_BIN` | Alternative upload command used by the pipeline | `./yt_upload.sh` |
 | `YT_UPLOAD_PYTHON` | Python executable used by `yt_upload.sh` | `.venv-youtube-upload/bin/python3` |

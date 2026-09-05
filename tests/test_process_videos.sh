@@ -268,9 +268,17 @@ test_invalid_stage_threads_and_video_settings() {
   assert_eq 1 "$LAST_STATUS" "invalid x264 preset must fail"
   assert_contains "Unbekanntes libx264-Preset" "invalid x264 preset error should be clear"
 
+  run_pipeline "$test_home" -d -p ultrafast 2099-01-01
+  assert_eq 1 "$LAST_STATUS" "ultrafast must fail because it cannot satisfy the High Profile contract"
+  assert_contains "erzeugt kein H.264 High Profile" "incompatible ultrafast preset error should be clear"
+
+  run_pipeline "$test_home" -d -q 0 2099-01-01
+  assert_eq 1 "$LAST_STATUS" "lossless CRF 0 must fail because it is incompatible with High Profile"
+  assert_contains "-q erwartet eine Ganzzahl von 1 bis 51" "invalid lossless CRF error should be clear"
+
   run_pipeline "$test_home" -d -q 52 2099-01-01
   assert_eq 1 "$LAST_STATUS" "out-of-range CRF must fail"
-  assert_contains "-q erwartet eine Ganzzahl von 0 bis 51" "invalid CRF error should be clear"
+  assert_contains "-q erwartet eine Ganzzahl von 1 bis 51" "invalid CRF error should be clear"
 
   run_pipeline "$test_home" -S impossible 2099-01-01
   assert_eq 1 "$LAST_STATUS" "invalid shutdown control action must fail"
@@ -319,6 +327,10 @@ test_dry_run_video_autostages_without_artifacts() {
   run_pipeline "$test_home" -d -e video -p medium -q 20 2099-01-01
   assert_eq 0 "$LAST_STATUS" "custom valid x264 settings should pass dry-run"
   assert_contains "Video-Encoding: libx264, preset=medium, crf=20" "dry-run should show custom x264 settings"
+
+  run_pipeline "$test_home" -d -e video -p superfast -q 1 2099-01-01
+  assert_eq 0 "$LAST_STATUS" "supported x264 boundary settings should pass dry-run"
+  assert_contains "Video-Encoding: libx264, preset=superfast, crf=1" "dry-run should show valid boundary settings"
 }
 
 test_dry_run_upload_with_final_artifact() {

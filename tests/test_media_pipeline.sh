@@ -275,6 +275,63 @@ test_single_segment_concat_preserves_source_permissions() {
   assert_eq 400 "$(file_mode "$merged_file")" "single-segment concat should retain masked source permissions"
 }
 
+test_replacement_preserves_existing_metadata() {
+  local test_home
+  local source_file
+  local merged_file
+  local expected_mode
+  local expected_group
+  local expected_acl=""
+  local actual_acl
+  local acl_supported=false
+  local xattr_supported=false
+  local primary_group
+  local candidate_group
+  test_home=$(new_home)
+  source_file="$test_home/Videos/OBS/2099-02-11 20-00-00.mkv"
+  merged_file="$test_home/Videos/OBS/final/merged_2099-02-11.mkv"
+
+  create_three_stream_segment "$source_file"
+  run_pipeline "$test_home" -c -e concat 2099-02-11
+  assert_eq 0 "$LAST_STATUS" "initial concat should create the metadata test target"
+
+  chmod 0640 "$merged_file"
+  primary_group=$(id -g)
+  for candidate_group in $(id -G); do
+    if [ "$candidate_group" != "$primary_group" ] && chgrp "$candidate_group" "$merged_file" 2>/dev/null; then
+      break
+    fi
+  done
+
+  if command -v setfacl >/dev/null 2>&1 && command -v getfacl >/dev/null 2>&1 &&
+    setfacl -m u:65534:r-- "$merged_file" 2>/dev/null; then
+    acl_supported=true
+    expected_acl=$(getfacl -cp "$merged_file")
+  fi
+
+  if command -v setfattr >/dev/null 2>&1 && command -v getfattr >/dev/null 2>&1 &&
+    setfattr -n user.obs_pipeline_test -v preserved "$merged_file" 2>/dev/null; then
+    xattr_supported=true
+  fi
+
+  expected_mode=$(file_mode "$merged_file")
+  expected_group=$(stat -c '%g' "$merged_file")
+
+  run_pipeline "$test_home" -c -e concat 2099-02-11
+  assert_eq 0 "$LAST_STATUS" "replacement concat should preserve existing metadata"
+  assert_eq "$expected_mode" "$(file_mode "$merged_file")" "replacement should preserve existing mode and ACL mask"
+  assert_eq "$expected_group" "$(stat -c '%g' "$merged_file")" "replacement should preserve existing group"
+
+  if [ "$acl_supported" = true ]; then
+    actual_acl=$(getfacl -cp "$merged_file")
+    assert_eq "$expected_acl" "$actual_acl" "replacement should preserve the existing access ACL"
+  fi
+  if [ "$xattr_supported" = true ]; then
+    assert_eq preserved "$(getfattr --only-values -n user.obs_pipeline_test "$merged_file" 2>/dev/null)" \
+      "replacement should preserve existing extended attributes"
+  fi
+}
+
 test_restrictive_umask_keeps_temporary_outputs_writable() {
   local test_home
   local merged_file
@@ -368,6 +425,20 @@ test_audio_and_video_stages_create_outputs() {
   run_pipeline "$test_home" -c -e video -m "$profile" "$date"
   assert_eq 0 "$LAST_STATUS" "repeated video stage should succeed for $profile"
   assert_eq 660 "$(file_mode "$output_file")" "replaced final MP4 should preserve existing permissions"
+}
+
+test_supported_x264_boundary_settings_create_high_profile() {
+  local test_home
+  local output_file
+  test_home=$(new_home)
+  output_file="$test_home/Videos/OBS/final/DSA5 mit Marth 12.02.2099 final.mp4"
+
+  create_three_stream_segment "$test_home/Videos/OBS/2099-02-12 20-00-00.mkv"
+  run_pipeline "$test_home" -c -e concat,audio,video -p superfast -q 1 2099-02-12
+
+  assert_eq 0 "$LAST_STATUS" "supported x264 boundary settings should complete the media pipeline"
+  assert_eq High "$(video_property "$output_file" profile)" \
+    "fastest supported preset and lowest supported CRF should satisfy the High Profile contract"
 }
 
 test_audio_stage_rejects_non_three_stream_layout() {
@@ -521,9 +592,11 @@ main() {
 
   test_concat_preserves_three_audio_streams
   test_single_segment_concat_preserves_source_permissions
+  test_replacement_preserves_existing_metadata
   test_restrictive_umask_keeps_temporary_outputs_writable
   test_audio_and_video_stages_create_outputs balanced 2099-02-02 02.02.2099
   test_audio_and_video_stages_create_outputs voice-priority 2099-02-04 04.02.2099
+  test_supported_x264_boundary_settings_create_high_profile
   test_audio_stage_rejects_non_three_stream_layout
   test_audio_stage_uses_independent_track_inputs
   test_delayed_audio_tracks_survive_processing

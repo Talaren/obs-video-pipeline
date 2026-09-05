@@ -74,6 +74,35 @@ class YouTubeUploadTests(unittest.TestCase):
 
     self.assertEqual(2, raised.exception.code)
 
+  def test_playlist_position_rejects_values_outside_uint32_before_upload(self) -> None:
+    for invalid_position in ("-1", str(yt_upload.MAX_PLAYLIST_POSITION + 1)):
+      with self.subTest(position=invalid_position):
+        argv = [
+            "yt_upload.py",
+            "--title",
+            "Test",
+            "--playlist-id",
+            "playlist-123",
+            "--playlist-position",
+            invalid_position,
+            "video.mp4",
+        ]
+        with (
+            patch.object(yt_upload.sys, "argv", argv),
+            redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
+          yt_upload.parse_args()
+
+        self.assertEqual(2, raised.exception.code)
+
+  def test_playlist_position_accepts_uint32_boundaries(self) -> None:
+    self.assertEqual(0, yt_upload.parse_playlist_position("0"))
+    self.assertEqual(
+        yt_upload.MAX_PLAYLIST_POSITION,
+        yt_upload.parse_playlist_position(str(yt_upload.MAX_PLAYLIST_POSITION)),
+    )
+
   def test_resumable_upload_retries_temporary_http_error(self) -> None:
     request = FakeUploadRequest()
 

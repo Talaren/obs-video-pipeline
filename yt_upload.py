@@ -30,6 +30,7 @@ DEFAULT_TOKEN_FILE = Path.home() / ".config" / "yt-upload" / "token.json"
 VALID_PRIVACY = {"private", "public", "unlisted"}
 MAX_RETRIES = 10
 PLAYLIST_PARTIAL_EXIT_STATUS = 3
+MAX_PLAYLIST_POSITION = (2**32) - 1
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
 UPLOAD_PROGRESS_FD_ENV = "YT_UPLOAD_PROGRESS_FD"
 RETRIABLE_EXCEPTIONS = (
@@ -44,6 +45,19 @@ RETRIABLE_EXCEPTIONS = (
     http.client.ResponseNotReady,
     http.client.BadStatusLine,
 )
+
+
+def parse_playlist_position(raw_position: str) -> int:
+  try:
+    position = int(raw_position)
+  except ValueError as exc:
+    raise argparse.ArgumentTypeError("muss eine Ganzzahl sein") from exc
+
+  if not 0 <= position <= MAX_PLAYLIST_POSITION:
+    raise argparse.ArgumentTypeError(
+        f"muss zwischen 0 und {MAX_PLAYLIST_POSITION} liegen"
+    )
+  return position
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,9 +99,12 @@ def parse_args() -> argparse.Namespace:
   )
   parser.add_argument(
       "--playlist-position",
-      type=int,
+      type=parse_playlist_position,
       default=None,
-      help="Optional target position in playlist (requires --playlist-id)",
+      help=(
+          "Optional zero-based target position in playlist "
+          f"(0-{MAX_PLAYLIST_POSITION}; requires --playlist-id)"
+      ),
   )
   return parser.parse_args()
 

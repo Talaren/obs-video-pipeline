@@ -167,8 +167,8 @@ Optionen:
                  (Wenn -e nicht gesetzt ist: concat,audio,video,clean)
   -T THREADS     Anzahl Threads pro ffmpeg-Prozess (setzt -threads bei ffmpeg-Aufrufen)
   -m PROFILE     Audio-Mix-Profil: balanced (Default) oder voice-priority
-  -p PRESET      libx264-Preset fuer Video (Standard: slow)
-  -q CRF         libx264-Qualitaet 0-51 (Standard: 18; kleiner = hoehere Qualitaet)
+  -p PRESET      libx264-Preset fuer Video (superfast bis placebo; Standard: slow)
+  -q CRF         libx264-Qualitaet 1-51 (Standard: 18; kleiner = hoehere Qualitaet)
   -h             Hilfe
 
 Audio-Annahme (ohne Fallback):
@@ -450,7 +450,11 @@ esac
 AUDIO_MIX_PROFILE="$normalized_mix_profile"
 
 case "$VIDEO_X264_PRESET" in
-  ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo)
+  superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo)
+    ;;
+  ultrafast)
+    log_msg "Fehler: libx264-Preset 'ultrafast' erzeugt kein H.264 High Profile und wird nicht unterstuetzt."
+    exit 1
     ;;
   *)
     log_msg "Fehler: Unbekanntes libx264-Preset '$VIDEO_X264_PRESET'."
@@ -458,8 +462,8 @@ case "$VIDEO_X264_PRESET" in
     ;;
 esac
 
-if [[ ! "$VIDEO_X264_CRF" =~ ^[0-9]+$ ]] || [ "$VIDEO_X264_CRF" -gt 51 ]; then
-  log_msg "Fehler: -q erwartet eine Ganzzahl von 0 bis 51 (erhalten: $VIDEO_X264_CRF)."
+if [[ ! "$VIDEO_X264_CRF" =~ ^[0-9]+$ ]] || [ "$VIDEO_X264_CRF" -lt 1 ] || [ "$VIDEO_X264_CRF" -gt 51 ]; then
+  log_msg "Fehler: -q erwartet eine Ganzzahl von 1 bis 51 (erhalten: $VIDEO_X264_CRF)."
   exit 1
 fi
 
@@ -612,7 +616,10 @@ publish_temp_file() {
   validate_output_target "$target_file"
 
   if [ -e "$target_file" ]; then
-    chmod --reference="$target_file" -- "$temp_file"
+    if ! cp --attributes-only --preserve=mode,ownership,xattr -- "$target_file" "$temp_file"; then
+      log_msg "Fehler: Metadaten des bestehenden Ausgabeziels konnten nicht uebernommen werden ($target_file)."
+      return 1
+    fi
   elif [ -n "$new_file_reference" ]; then
     current_umask=$(umask)
     reference_mode=$(stat -c '%a' "$new_file_reference")

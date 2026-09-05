@@ -4,9 +4,9 @@ Automates post-processing for OBS recordings by date, improves voice clarity, en
 
 ## Requirements
 
-- Linux with Bash 4 or newer and GNU userland (`date -d`, `find -print0`, `sort -z`)
+- Linux with Bash 4 or newer, `/proc`, and GNU userland (`date -d`, `find -print0`, `sort -z`, `stat`)
 - `systemd-inhibit` to prevent automatic suspend or hibernation during processing without keeping the displays awake
-- `flock` from util-linux for race-free runtime shutdown control
+- `flock` from util-linux for per-date pipeline locking and race-free runtime shutdown control
 - A recent FFmpeg build providing `ffmpeg`, `ffprobe`, `libx264`, `loudnorm`, `sidechaincompress`, and the AAC encoder
 - Enough free space for the merged MKV, processed audio, and final MP4 during a full run
 - Optional desktop/system integration:
@@ -33,6 +33,13 @@ being paused by automatic suspend or hibernation. Idle behavior is deliberately
 not inhibited, so the screen saver, screen lock, and monitor power saving may
 still activate. Shutdown is also not blocked, so `-s` can power off the computer
 after a successful run.
+
+Only one real pipeline may process a given date at a time. A second invocation
+for the same date exits with status 75 instead of touching that workflow's media
+artifacts. Pipelines for other dates, dry-runs, and `-S` shutdown-control calls
+remain available concurrently. The small `.pipeline_YYYY-MM-DD.lock` file is
+persistent; the operating-system lock itself is released automatically when the
+pipeline exits.
 
 FFmpeg encoding and YouTube upload progress remain visible in the terminal but
 bypass `full_pipeline_*.log`. Normal status messages, successful upload details,
@@ -189,9 +196,18 @@ Default order if `-e` is not provided:
 concat,audio,video,clean
 ```
 
-`-e` selects a set of stages; supplied names do not change the fixed execution order shown above. Missing prerequisites are added automatically, but only file existence is checked. Modification times are not compared. Use the full default pipeline after source recordings change, and use `-e upload` only when the existing final MP4 is known to be current.
+`-e` selects a set of stages; supplied names do not change the fixed execution
+order shown above. Explicitly selected stages always run. Missing or older
+prerequisites are added automatically: the script compares the selected OBS MKV
+timestamps with `merged`, processed audio, and the final MP4, and also compares
+each existing intermediate with its downstream output. After `clean`, a final
+MP4 remains directly uploadable while it is at least as new as every matching
+OBS source. Timestamp checks do not detect content changes that preserve an
+existing file's modification time.
 
-All segments selected for concat must have compatible stream layouts, codecs, and recording parameters. Do not run two pipeline processes for the same date concurrently.
+All segments selected for concat must have compatible stream layouts, codecs,
+and recording parameters. If a pipeline for the same date is already active, a
+second real invocation is rejected instead of waiting or running concurrently.
 
 ## Usage
 
@@ -335,6 +351,7 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
   - `filelist_mkv_YYYY-MM-DD.txt` (multiple segments only; removed by default)
   - `DSA5 mit Marth DD.MM.YYYY final.mp4`
   - `full_pipeline_YYYY-MM-DD_*.log`
+  - `.pipeline_YYYY-MM-DD.lock` (persistent per-date lock file; negligible size)
 
 ## Quality & Security Guardrails
 
@@ -359,6 +376,7 @@ Uploads use resumable chunks and retry temporary network and HTTP 5xx failures w
 - `-s` triggers shutdown after completion.
 - CPU video encoding can take several hours; shutdown runs only after every selected stage succeeds.
 - Real pipeline runs automatically inhibit suspend and hibernation until completion; screen savers and monitor power saving remain available, and dry-runs do not acquire an inhibitor.
+- Concurrent real runs for the same date fail with status 75; other dates, dry-runs, and runtime shutdown control are unaffected.
 - `-n` sends a desktop notification after completion.
 - If both `-s` and `-n` are supplied, shutdown takes precedence regardless of option order.
 - Exactly one positional date argument is accepted.

@@ -31,6 +31,7 @@ VALID_PRIVACY = {"private", "public", "unlisted"}
 MAX_RETRIES = 10
 PLAYLIST_PARTIAL_EXIT_STATUS = 3
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
+UPLOAD_PROGRESS_FD_ENV = "YT_UPLOAD_PROGRESS_FD"
 RETRIABLE_EXCEPTIONS = (
     TransportError,
     httplib2.HttpLib2Error,
@@ -158,6 +159,25 @@ def add_to_playlist(youtube, video_id: str, playlist_id: str, position: int | No
   return str(response["id"])
 
 
+def emit_upload_progress(progress: int) -> None:
+  message = f"Upload-Fortschritt: {progress}%\n"
+  progress_fd_value = os.environ.get(UPLOAD_PROGRESS_FD_ENV)
+  if progress_fd_value is None:
+    print(message, end="", flush=True)
+    return
+
+  try:
+    progress_fd = int(progress_fd_value)
+    if progress_fd < 0:
+      raise ValueError
+    os.write(progress_fd, message.encode("utf-8"))
+  except (OSError, ValueError) as exc:
+    raise RuntimeError(
+        f"Ungueltiger Fortschritts-Dateideskriptor in {UPLOAD_PROGRESS_FD_ENV}: "
+        f"{progress_fd_value}"
+    ) from exc
+
+
 def resumable_upload(request) -> str:
   response = None
   last_progress = None
@@ -171,7 +191,7 @@ def resumable_upload(request) -> str:
       if status is not None:
         progress = int(status.progress() * 100)
         if progress != last_progress:
-          print(f"Upload-Fortschritt: {progress}%", flush=True)
+          emit_upload_progress(progress)
           last_progress = progress
     except HttpError as exc:
       if exc.resp.status not in RETRIABLE_STATUS_CODES:

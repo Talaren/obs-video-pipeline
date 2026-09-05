@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -41,6 +42,19 @@ class FakeTransportErrorUploadRequest:
 
 
 class YouTubeUploadTests(unittest.TestCase):
+  def test_upload_progress_can_use_dedicated_file_descriptor(self) -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+      with patch.dict(
+          yt_upload.os.environ,
+          {yt_upload.UPLOAD_PROGRESS_FD_ENV: str(write_fd)},
+      ):
+        yt_upload.emit_upload_progress(42)
+      self.assertEqual(b"Upload-Fortschritt: 42%\n", os.read(read_fd, 1024))
+    finally:
+      os.close(read_fd)
+      os.close(write_fd)
+
   def test_argparse_errors_keep_reserved_exit_status_two(self) -> None:
     argv = [
         "yt_upload.py",

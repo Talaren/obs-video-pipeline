@@ -5,6 +5,7 @@
   - `process_videos.sh` (main pipeline)
   - `yt_upload.sh` (YouTube upload wrapper)
   - `yt_upload.py` (YouTube Data API uploader)
+- Python upload dependencies: `requirements.txt`
 - Audio filters: `filters/balanced.fffilter`, `filters/voice-priority.fffilter`
 - Inputs: `~/Videos/OBS/*.mkv` (date contained in filename).
 - Outputs: `~/Videos/OBS/final/`
@@ -17,17 +18,21 @@
 - Run pipeline (default stages: concat,audio,video,clean): `./process_videos.sh 2025-08-28`
 - Select stages: `./process_videos.sh -e concat,audio,video,clean 2025-08-28`
 - Include upload explicitly: `./process_videos.sh -e concat,audio,video,upload,clean 2025-08-28`
+- Change shutdown of a running `-s` pipeline: `./process_videos.sh -S disable|enable|status 2025-08-28`
 - Audio only (auto-concat if merged file is missing): `./process_videos.sh -e audio -m balanced 2025-08-28`
 - Video only (auto-runs audio when processed audio is missing): `./process_videos.sh -e video 2025-08-28`
 - Upload only (requires final MP4 or auto-builds missing prerequisites): `./process_videos.sh -e upload 2025-08-28`
 - Dry-run stage plan without writing files: `./process_videos.sh -d -e upload 2025-08-28`
 - Run dry-run control-flow tests: `./tests/test_process_videos.sh`
 - Run media pipeline smoke tests: `./tests/test_media_pipeline.sh`
+- Run x264 benchmark control-flow tests: `./tests/test_benchmark_x264.sh`
 - Set ffmpeg threads: `./process_videos.sh -T 6 2025-08-28`
+- Override x264 settings: `./process_videos.sh -p medium -q 20 2025-08-28` (presets `superfast` through `placebo`, CRF 1–51)
 - Mix profile: `./process_videos.sh -m voice-priority 2025-08-28`
 - Lint Bash: `shellcheck process_videos.sh`
 - Format Bash: `shfmt -w -i 2 -ci process_videos.sh`
-- Python upload deps (local venv): `python3 -m venv .venv-youtube-upload && .venv-youtube-upload/bin/pip install google-api-python-client google-auth-oauthlib google-auth-httplib2`
+- Python upload deps (local venv): `python3 -m venv .venv-youtube-upload && .venv-youtube-upload/bin/pip install -r requirements.txt`
+- Run uploader unit tests: `.venv-youtube-upload/bin/python3 -m unittest tests/test_yt_upload.py`
 
 ## Coding Style & Naming Conventions
 - Languages:
@@ -42,6 +47,8 @@
 - Smoke test: run with a small sample MKV and `-e concat,audio,video` to verify outputs.
 - Control-flow tests: run `./tests/test_process_videos.sh` to verify validation, dry-run planning, and auto-stage behavior without processing media.
 - Media smoke tests: run `./tests/test_media_pipeline.sh` to generate tiny MKV fixtures and verify concat/audio/video behavior.
+- Uploader tests: run `.venv-youtube-upload/bin/python3 -m unittest tests/test_yt_upload.py` without contacting YouTube.
+- Video contract: verify H.264 High Profile, `yuv420p`, BT.709, progressive scan, two B-frames, source resolution/frame rate, one copied audio stream, and atomic publication. Reject `ultrafast` and CRF 0 before encoding because they cannot satisfy the contract.
 - Audio stream contract: exactly 3 audio streams are required; verify failure message for non-3 stream layouts.
 - Mix profile checks: test both `-m balanced` and `-m voice-priority`.
 - Idempotence: rerun stages; ensure no unexpected overwrites.
@@ -58,13 +65,17 @@
 
 ## Security & Configuration Tips
 - Shutdown/notify: use `-s` (shutdown) and `-n` (notify) carefully; default is no side-effects.
-- Performance: ffmpeg uses stream copy for concat/remux; option `-T` sets threads for ffmpeg calls.
-- Video handling: OBS video is not re-encoded; pipeline does concat/copy to `merged_YYYY-MM-DD.mkv`, then final remux with `-c:v copy -c:a copy -movflags +faststart`.
-- Audio processing: runs once on merged session and expects strict stream mapping:
+- Runtime shutdown control: `-S disable|enable|status DATE` updates or reads the active date-specific `-s` run under `flock`; missing or invalid control state must fail safe without powering off.
+- Sleep inhibition: non-dry-run processing executes through `systemd-inhibit --what=sleep --mode=block`; idle stays uninhibited for screen savers and monitor power saving, and the optional final shutdown is not blocked.
+- Performance: concat uses stream copy; the final video uses CPU/libx264 and can run for several hours. Option `-T` sets threads for ffmpeg calls.
+- Video handling: the production `video` stage encodes CPU/libx264 with default preset `medium`, CRF 21, source resolution/frame rate, High Profile, `yuv420p`, two B-frames, a closed GOP no longer than half the frame rate, BT.709 SDR signaling, and `+faststart`. The processed AAC track is stream-copied into the MP4.
+- Output safety: media stages keep temporary outputs owner-writable while processing, then atomically publish them; new outputs honor `umask`, replacements preserve target mode, ownership/group, access ACL, and extended attributes, and non-regular/symlink targets are rejected.
+- Audio processing: runs once on merged session, emits 48-kHz AAC, and expects strict stream mapping:
   - `a:0` discord
   - `a:1` foundry
   - `a:2` own voice
   - No fallback path for 1/2 streams.
+  - FFmpeg opens the merged MKV independently for each audio track so long OBS/Opus recordings cannot silently lose secondary inputs in multi-input filters.
 - Mix profile:
   - `balanced` (default): clear speech with moderate ducking.
   - `voice-priority`: stronger speech focus and stronger ducking of foundry.
@@ -76,7 +87,7 @@
   - Base scope is `youtube.upload`; playlist insertion requires an additional YouTube scope.
   - `YOUTUBE_UPLOAD_TAGS` sets comma-separated tags.
   - `YOUTUBE_UPLOAD_PLAYLIST_ID` adds uploaded video to a playlist.
-  - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets insertion index in that playlist.
+  - `YOUTUBE_UPLOAD_PLAYLIST_POSITION` optionally sets a zero-based uint32 insertion index in that playlist and is validated before upload.
   - Extra uploader args are passed via newline-separated `YOUTUBE_UPLOAD_EXTRA_ARGS`.
 - Cleanup: `clean` removes current workflow artifacts (`merged_*`, `processed_audio_*`, `filelist_mkv_YYYY-MM-DD.txt`) and legacy per-segment artifacts for the selected date (`*_piece.mp4`, `*_processed_audio.m4a`, `filelist.txt`, `filelist_mkv.txt`).
 

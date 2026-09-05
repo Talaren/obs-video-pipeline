@@ -11,7 +11,7 @@ acompressor=threshold=0.095:ratio=3.5:attack=3:release=130:makeup=2.2,
 alimiter=limit=0.95
 [discord];
 
-[0:a:2]
+[2:a:2]
 aformat=sample_fmts=fltp:channel_layouts=stereo,
 highpass=f=100,
 lowpass=f=14000,
@@ -34,7 +34,7 @@ volume=-0.3dB
 [voices]
 asplit=2[voices_main][voices_side];
 
-[0:a:1]
+[1:a:1]
 aformat=sample_fmts=fltp:channel_layouts=stereo,
 highpass=f=40,
 lowpass=f=10500,

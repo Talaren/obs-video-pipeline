@@ -11,10 +11,12 @@ Review for correctness and safety first, style second.
 - Verify changes preserve existing CLI behavior unless explicitly requested.
 
 ## Repository-Specific Rules
-- `process_videos.sh` is a concat/remux workflow:
-  - Keep stage model: `concat,audio,video,clean`.
-  - Do not reintroduce video re-encode settings (`-q`, `-p`, x264 options).
-  - Keep final video as remux (`-c:v copy -c:a copy -movflags +faststart`).
+- `process_videos.sh` is a concat/audio/CPU-video workflow:
+  - Keep stage model: `concat,audio,video,upload,clean`.
+  - Keep final video on CPU/libx264 with preset `slow` and CRF 18 defaults.
+  - Preserve source resolution/frame rate and YouTube-oriented H.264 properties:
+    High Profile, `yuv420p`, progressive, two B-frames, closed GOP, BT.709.
+  - Keep processed AAC stream-copied into the final MP4 and retain `+faststart`.
 - Preserve output naming conventions:
   - `merged_YYYY-MM-DD.mkv`
   - `processed_audio_YYYY-MM-DD.m4a`

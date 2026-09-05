@@ -438,6 +438,7 @@ normalized_mix_profile="${AUDIO_MIX_PROFILE,,}"
 normalized_mix_profile="${normalized_mix_profile//_/-}"
 case "$normalized_mix_profile" in
   balanced | voice-priority)
+    :
     ;;
   voice)
     normalized_mix_profile="voice-priority"
@@ -451,6 +452,7 @@ AUDIO_MIX_PROFILE="$normalized_mix_profile"
 
 case "$VIDEO_X264_PRESET" in
   superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo)
+    :
     ;;
   ultrafast)
     log_msg "Fehler: libx264-Preset 'ultrafast' erzeugt kein H.264 High Profile und wird nicht unterstuetzt."

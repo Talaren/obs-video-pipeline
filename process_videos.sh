@@ -2,15 +2,25 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ORIGINAL_ARGS=("$@")
 
 CLEANUP=true
 DRY_RUN=false
 NOTIFY=false
 SHUTDOWN=false
+SHUTDOWN_CONTROL_ACTION=""
+SHUTDOWN_CONTROL_FILE=""
+SHUTDOWN_CONTROL_OWNED=false
+SHUTDOWN_CONTROL_PID=""
+SHUTDOWN_CONTROL_STATE=""
 STAGES=""
 FFMPEG_THREADS=""
 FFMPEG="ffmpeg"
+SYSTEMD_INHIBIT_BIN="${SYSTEMD_INHIBIT_BIN:-systemd-inhibit}"
+SLEEP_INHIBIT_ACTIVE=false
 AUDIO_MIX_PROFILE="${AUDIO_MIX_PROFILE:-balanced}"
+VIDEO_X264_PRESET="${VIDEO_X264_PRESET:-slow}"
+VIDEO_X264_CRF="${VIDEO_X264_CRF:-18}"
 YOUTUBE_UPLOAD_BIN="${YOUTUBE_UPLOAD_BIN:-$SCRIPT_DIR/yt_upload.sh}"
 YOUTUBE_UPLOAD_PRIVACY="unlisted"
 YOUTUBE_UPLOAD_DESCRIPTION="${YOUTUBE_UPLOAD_DESCRIPTION:-Archivaufnahme einer DSA5-Runde.}"
@@ -24,6 +34,85 @@ TEMP_FILES=()
 
 log_msg() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+write_shutdown_control_file() {
+  local control_file="$1"
+  local pipeline_pid="$2"
+  local control_state="$3"
+  local temp_file
+
+  if [ -L "$control_file" ] || { [ -e "$control_file" ] && [ ! -f "$control_file" ]; }; then
+    log_msg "Fehler: Shutdown-Steuerdatei ist keine regulaere Datei ($control_file)."
+    return 1
+  fi
+
+  temp_file=$(mktemp --tmpdir="${control_file%/*}" ".shutdown-control.XXXXXX")
+  chmod 0600 -- "$temp_file"
+  if ! printf 'pid=%s\nstate=%s\n' "$pipeline_pid" "$control_state" >"$temp_file"; then
+    rm -f -- "$temp_file"
+    return 1
+  fi
+  if ! mv -fT -- "$temp_file" "$control_file"; then
+    rm -f -- "$temp_file"
+    return 1
+  fi
+}
+
+read_shutdown_control_file() {
+  local control_file="$1"
+  local key
+  local value
+
+  SHUTDOWN_CONTROL_PID=""
+  SHUTDOWN_CONTROL_STATE=""
+
+  if [ -L "$control_file" ] || [ ! -f "$control_file" ]; then
+    return 1
+  fi
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      pid) SHUTDOWN_CONTROL_PID="$value" ;;
+      state) SHUTDOWN_CONTROL_STATE="$value" ;;
+      *) return 1 ;;
+    esac
+  done <"$control_file"
+
+  if [[ ! "$SHUTDOWN_CONTROL_PID" =~ ^[1-9][0-9]*$ ]]; then
+    return 1
+  fi
+  case "$SHUTDOWN_CONTROL_STATE" in
+    enabled | disabled) ;;
+    *) return 1 ;;
+  esac
+}
+
+cleanup_shutdown_control_file() {
+  if [ "$SHUTDOWN_CONTROL_OWNED" = true ] && [ -n "$SHUTDOWN_CONTROL_FILE" ]; then
+    if lock_shutdown_control; then
+      rm -f -- "$SHUTDOWN_CONTROL_FILE"
+      SHUTDOWN_CONTROL_OWNED=false
+      unlock_shutdown_control
+    fi
+  fi
+}
+
+lock_shutdown_control() {
+  if [ -z "$SHUTDOWN_CONTROL_FILE" ] || [ ! -d "${SHUTDOWN_CONTROL_FILE%/*}" ]; then
+    return 1
+  fi
+
+  exec 9<"${SHUTDOWN_CONTROL_FILE%/*}"
+  if ! flock -x 9; then
+    exec 9<&-
+    return 1
+  fi
+}
+
+unlock_shutdown_control() {
+  flock -u 9
+  exec 9<&-
 }
 
 cleanup_temp_files() {
@@ -41,6 +130,7 @@ handle_error() {
 
   trap - ERR
   cleanup_temp_files || true
+  cleanup_shutdown_control_file || true
   log_msg "Skript unerwartet beendet. Fuehre ggf. Aufraeumarbeiten durch..."
   exit "$exit_status"
 }
@@ -51,6 +141,7 @@ handle_signal() {
 
   trap - ERR INT TERM
   cleanup_temp_files || true
+  cleanup_shutdown_control_file || true
   log_msg "Skript durch $signal_name beendet."
   exit "$exit_status"
 }
@@ -58,6 +149,7 @@ handle_signal() {
 trap 'handle_error $?' ERR
 trap 'handle_signal SIGINT 130' INT
 trap 'handle_signal SIGTERM 143' TERM
+trap 'cleanup_shutdown_control_file' EXIT
 
 show_help() {
   cat <<'EOF'
@@ -68,11 +160,15 @@ Optionen:
   -d             Dry-Run: geplante Schritte anzeigen, nichts ausfuehren
   -n             Benachrichtigung am Ende anzeigen
   -s             Statt Benachrichtigung am Ende Shutdown ausfuhren (setzt NOTIFY=false)
+  -S ACTION      Shutdown eines laufenden -s-Prozesses steuern:
+                 enable, disable oder status (jeweils mit dessen DATUM)
   -e STAGES      Auszufuhrende Schritte, kommagetrennt:
                  concat,audio,video,upload,clean
                  (Wenn -e nicht gesetzt ist: concat,audio,video,clean)
   -T THREADS     Anzahl Threads pro ffmpeg-Prozess (setzt -threads bei ffmpeg-Aufrufen)
   -m PROFILE     Audio-Mix-Profil: balanced (Default) oder voice-priority
+  -p PRESET      libx264-Preset fuer Video (Standard: slow)
+  -q CRF         libx264-Qualitaet 0-51 (Standard: 18; kleiner = hoehere Qualitaet)
   -h             Hilfe
 
 Audio-Annahme (ohne Fallback):
@@ -92,7 +188,7 @@ YouTube-Upload:
 EOF
 }
 
-while getopts ":cdnhe:T:m:s" opt; do
+while getopts ":cdnhe:S:T:m:p:q:s" opt; do
   case "$opt" in
     c)
       CLEANUP=false
@@ -107,6 +203,9 @@ while getopts ":cdnhe:T:m:s" opt; do
       SHUTDOWN=true
       NOTIFY=false
       ;;
+    S)
+      SHUTDOWN_CONTROL_ACTION="${OPTARG,,}"
+      ;;
     e)
       STAGES="$OPTARG"
       ;;
@@ -115,6 +214,12 @@ while getopts ":cdnhe:T:m:s" opt; do
       ;;
     m)
       AUDIO_MIX_PROFILE="$OPTARG"
+      ;;
+    p)
+      VIDEO_X264_PRESET="$OPTARG"
+      ;;
+    q)
+      VIDEO_X264_CRF="$OPTARG"
       ;;
     h)
       show_help
@@ -171,13 +276,86 @@ MERGED_FILE="$OUTPUT_DIR/merged_${DATE}.mkv"
 PROCESSED_AUDIO="$OUTPUT_DIR/processed_audio_${DATE}.m4a"
 FILE_LIST_MKV="$OUTPUT_DIR/filelist_mkv_${DATE}.txt"
 OUTPUT_FILE="$OUTPUT_DIR/DSA5 mit Marth ${FORMATTED_DATE} final.mp4"
+SHUTDOWN_CONTROL_FILE="$OUTPUT_DIR/.shutdown_${DATE}.control"
+
+if [ -n "$SHUTDOWN_CONTROL_ACTION" ]; then
+  case "$SHUTDOWN_CONTROL_ACTION" in
+    enable | disable | status) ;;
+    *)
+      echo "Fehler: -S erwartet enable, disable oder status (erhalten: $SHUTDOWN_CONTROL_ACTION)." >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "Fehler: Benoetigtes Kommando 'flock' wurde nicht gefunden." >&2
+    exit 1
+  fi
+  if ! lock_shutdown_control; then
+    echo "Fehler: Shutdown-Steuerung fuer $DATE konnte nicht gesperrt werden." >&2
+    exit 1
+  fi
+  if ! read_shutdown_control_file "$SHUTDOWN_CONTROL_FILE"; then
+    unlock_shutdown_control
+    echo "Fehler: Keine gueltige Shutdown-Steuerung fuer $DATE gefunden. Laeuft die Pipeline mit -s?" >&2
+    exit 1
+  fi
+  if ! kill -0 "$SHUTDOWN_CONTROL_PID" 2>/dev/null; then
+    unlock_shutdown_control
+    echo "Fehler: Der zur Shutdown-Steuerung gehoerende Prozess $SHUTDOWN_CONTROL_PID laeuft nicht mehr." >&2
+    exit 1
+  fi
+
+  case "$SHUTDOWN_CONTROL_ACTION" in
+    enable)
+      write_shutdown_control_file "$SHUTDOWN_CONTROL_FILE" "$SHUTDOWN_CONTROL_PID" enabled
+      printf 'Shutdown fuer Pipeline-Prozess %s aktiviert.\n' "$SHUTDOWN_CONTROL_PID"
+      ;;
+    disable)
+      write_shutdown_control_file "$SHUTDOWN_CONTROL_FILE" "$SHUTDOWN_CONTROL_PID" disabled
+      printf 'Shutdown fuer Pipeline-Prozess %s deaktiviert.\n' "$SHUTDOWN_CONTROL_PID"
+      ;;
+    status)
+      if [ "$SHUTDOWN_CONTROL_STATE" = "enabled" ]; then
+        printf 'Shutdown fuer Pipeline-Prozess %s: aktiviert.\n' "$SHUTDOWN_CONTROL_PID"
+      else
+        printf 'Shutdown fuer Pipeline-Prozess %s: deaktiviert.\n' "$SHUTDOWN_CONTROL_PID"
+      fi
+      ;;
+  esac
+  unlock_shutdown_control
+  exit 0
+fi
+
+if [ "$DRY_RUN" = false ]; then
+  if [ "${OBS_VIDEO_PIPELINE_INHIBITED:-}" = "1" ]; then
+    SLEEP_INHIBIT_ACTIVE=true
+  else
+    if ! command -v "$SYSTEMD_INHIBIT_BIN" >/dev/null 2>&1; then
+      echo "Fehler: Benoetigtes Kommando '$SYSTEMD_INHIBIT_BIN' wurde nicht gefunden; die Verarbeitung kann nicht gegen automatischen Ruhezustand geschuetzt werden." >&2
+      exit 1
+    fi
+
+    export OBS_VIDEO_PIPELINE_INHIBITED=1
+    exec "$SYSTEMD_INHIBIT_BIN" \
+      --what=sleep \
+      --who=obs-video-pipeline \
+      --why="OBS-Videoverarbeitung fuer $DATE" \
+      --mode=block \
+      -- "$SCRIPT_DIR/process_videos.sh" "${ORIGINAL_ARGS[@]}"
+  fi
+fi
 
 if [ "$DRY_RUN" = false ]; then
   mkdir -p "$OUTPUT_DIR"
   LOG_FILE="$OUTPUT_DIR/full_pipeline_${DATE}_$(date +"%Y%m%d_%H%M%S").log"
+  exec 3>&1
   exec > >(tee -i "$LOG_FILE") 2>&1
 
   log_msg "Starte Prozess fuer Datum: $DATE"
+  if [ "$SLEEP_INHIBIT_ACTIVE" = true ]; then
+    log_msg "Schlafsperre aktiv (systemd: sleep; Bildschirmschoner und Monitorabschaltung bleiben erlaubt)."
+  fi
 fi
 
 if [ -z "$STAGES" ]; then
@@ -271,6 +449,20 @@ case "$normalized_mix_profile" in
 esac
 AUDIO_MIX_PROFILE="$normalized_mix_profile"
 
+case "$VIDEO_X264_PRESET" in
+  ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo)
+    ;;
+  *)
+    log_msg "Fehler: Unbekanntes libx264-Preset '$VIDEO_X264_PRESET'."
+    exit 1
+    ;;
+esac
+
+if [[ ! "$VIDEO_X264_CRF" =~ ^[0-9]+$ ]] || [ "$VIDEO_X264_CRF" -gt 51 ]; then
+  log_msg "Fehler: -q erwartet eine Ganzzahl von 0 bis 51 (erhalten: $VIDEO_X264_CRF)."
+  exit 1
+fi
+
 if $run_audio && [ ! -f "$SCRIPT_DIR/filters/${AUDIO_MIX_PROFILE}.fffilter" ]; then
   log_msg "Fehler: Audio-Filterdatei fehlt: $SCRIPT_DIR/filters/${AUDIO_MIX_PROFILE}.fffilter"
   exit 1
@@ -313,6 +505,7 @@ if [ "$DRY_RUN" = true ]; then
     printf 'Auto-Stage: video, weil %s fehlt\n' "$OUTPUT_FILE"
   fi
   printf 'Mix-Profil: %s\n' "$AUDIO_MIX_PROFILE"
+  printf 'Video-Encoding: libx264, preset=%s, crf=%s\n' "$VIDEO_X264_PRESET" "$VIDEO_X264_CRF"
   printf 'FFmpeg-Threads: %s\n' "${FFMPEG_THREADS:-default}"
   printf 'Finale Datei: %s\n' "$OUTPUT_FILE"
   if [ "$SHUTDOWN" = true ]; then
@@ -332,6 +525,52 @@ require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     log_msg "Fehler: Benoetigtes Kommando '$1' wurde nicht gefunden."
     exit 1
+  fi
+}
+
+format_ffmpeg_progress() {
+  local frame="?"
+  local fps="?"
+  local quality="?"
+  local total_size="?"
+  local size_kib="?"
+  local out_time="?"
+  local bitrate="?"
+  local speed="?"
+  local progress=""
+  local line_open=false
+  local key
+  local value
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      frame) frame="$value" ;;
+      fps) fps="$value" ;;
+      stream_*_q) quality="$value" ;;
+      total_size) total_size="$value" ;;
+      out_time) out_time="$value" ;;
+      bitrate) bitrate="$value" ;;
+      speed) speed="$value" ;;
+      progress)
+        progress="$value"
+        if [[ "$total_size" =~ ^[0-9]+$ ]]; then
+          size_kib=$((total_size / 1024))
+        else
+          size_kib="?"
+        fi
+        printf '\rFFmpeg: frame=%s fps=%s q=%s size=%sKiB time=%s bitrate=%s speed=%s\033[K' \
+          "$frame" "$fps" "$quality" "$size_kib" "$out_time" "$bitrate" "$speed"
+        line_open=true
+        if [ "$progress" = "end" ]; then
+          printf '\n'
+          line_open=false
+        fi
+        ;;
+    esac
+  done
+
+  if [ "$line_open" = true ]; then
+    printf '\n'
   fi
 }
 
@@ -487,6 +726,23 @@ run_audio_stage() {
 
 run_video_stage() {
   local tmp_output
+  local source_width
+  local source_height
+  local source_frame_rate
+  local gop_size
+  local output_codec
+  local output_profile
+  local output_pixel_format
+  local output_width
+  local output_height
+  local output_frame_rate
+  local output_b_frames
+  local output_field_order
+  local output_color_range
+  local output_color_space
+  local output_color_transfer
+  local output_color_primaries
+  local output_audio_count
 
   if [ ! -f "$MERGED_FILE" ]; then
     log_msg "Fehler: merged-Datei fehlt ($MERGED_FILE)."
@@ -500,14 +756,79 @@ run_video_stage() {
 
   validate_output_target "$OUTPUT_FILE"
 
-  log_msg "Erzeuge finale MP4 per Remux (Video copy + neues Audio)..."
+  source_width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$MERGED_FILE")
+  source_height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$MERGED_FILE")
+  source_frame_rate=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "$MERGED_FILE")
+
+  if [[ ! "$source_width" =~ ^[0-9]+$ ]] || [ "$source_width" -lt 1 ] ||
+    [[ ! "$source_height" =~ ^[0-9]+$ ]] || [ "$source_height" -lt 1 ]; then
+    log_msg "Fehler: Videogroesse konnte nicht aus $MERGED_FILE gelesen werden."
+    exit 1
+  fi
+
+  if ! gop_size=$(awk -v rate="$source_frame_rate" 'BEGIN {
+    part_count = split(rate, parts, "/")
+    if (part_count != 2 || parts[1] <= 0 || parts[2] <= 0) {
+      exit 1
+    }
+    gop = int((parts[1] / parts[2] / 2) + 0.5)
+    if (gop < 1) {
+      gop = 1
+    }
+    print gop
+  }'); then
+    log_msg "Fehler: Bildrate konnte nicht aus $MERGED_FILE gelesen werden ($source_frame_rate)."
+    exit 1
+  fi
+
+  log_msg "Erzeuge finale MP4 per CPU/libx264 (preset=$VIDEO_X264_PRESET, crf=$VIDEO_X264_CRF, GOP=$gop_size)..."
   tmp_output=$(mktemp --tmpdir="$OUTPUT_DIR" ".final_${DATE}.XXXXXX.mp4")
   prepare_temp_output "$tmp_output"
-  "$FFMPEG" "${ffmpeg_common_args[@]}" "${thread_option[@]}" \
+  "$FFMPEG" "${ffmpeg_common_args[@]}" -stats_period 30 \
     -i "$MERGED_FILE" -i "$PROCESSED_AUDIO" \
     -map 0:v:0 -map 1:a:0 \
-    -c:v copy -c:a copy -movflags +faststart \
+    -c:v libx264 -preset "$VIDEO_X264_PRESET" -crf "$VIDEO_X264_CRF" \
+    -profile:v high -pix_fmt yuv420p -coder cabac \
+    -g "$gop_size" -keyint_min 1 -bf 2 \
+    -x264-params open-gop=0:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited \
+    -r "$source_frame_rate" -fps_mode cfr \
+    -color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
+    "${thread_option[@]}" \
+    -c:a copy -movflags +faststart \
+    -progress >(format_ffmpeg_progress >&3) \
     "$tmp_output"
+
+  output_codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$tmp_output")
+  output_profile=$(ffprobe -v error -select_streams v:0 -show_entries stream=profile -of csv=p=0 "$tmp_output")
+  output_pixel_format=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$tmp_output")
+  output_width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$tmp_output")
+  output_height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$tmp_output")
+  output_frame_rate=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "$tmp_output")
+  output_b_frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=has_b_frames -of csv=p=0 "$tmp_output")
+  output_field_order=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order -of csv=p=0 "$tmp_output")
+  output_color_range=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_range -of csv=p=0 "$tmp_output")
+  output_color_space=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_space -of csv=p=0 "$tmp_output")
+  output_color_transfer=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_transfer -of csv=p=0 "$tmp_output")
+  output_color_primaries=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of csv=p=0 "$tmp_output")
+  output_audio_count=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$tmp_output" | awk 'END { print NR }')
+
+  if [ "$output_codec" != "h264" ] ||
+    [ "$output_profile" != "High" ] ||
+    [ "$output_pixel_format" != "yuv420p" ] ||
+    [ "$output_width" != "$source_width" ] ||
+    [ "$output_height" != "$source_height" ] ||
+    [ "$output_frame_rate" != "$source_frame_rate" ] ||
+    [ "$output_b_frames" != "2" ] ||
+    [ "$output_field_order" != "progressive" ] ||
+    [ "$output_color_range" != "tv" ] ||
+    [ "$output_color_space" != "bt709" ] ||
+    [ "$output_color_transfer" != "bt709" ] ||
+    [ "$output_color_primaries" != "bt709" ] ||
+    [[ ! "$output_audio_count" =~ ^[0-9]+$ ]] ||
+    [ "$output_audio_count" -ne 1 ]; then
+    log_msg "Fehler: CPU-x264-Ausgabe hat unerwartete Stream-Eigenschaften: codec=$output_codec, profile=$output_profile, pix_fmt=$output_pixel_format, size=${output_width}x${output_height}, fps=$output_frame_rate, b_frames=$output_b_frames, field_order=$output_field_order, colors=${output_color_range}/${output_color_space}/${output_color_transfer}/${output_color_primaries}, audio_streams=$output_audio_count."
+    return 1
+  fi
 
   publish_temp_file "$tmp_output" "$OUTPUT_FILE"
   log_msg "Fertige Videodatei erstellt: $OUTPUT_FILE"
@@ -544,7 +865,7 @@ run_upload_stage() {
   fi
 
   log_msg "Lade Video zu YouTube hoch (Privacy: $YOUTUBE_UPLOAD_PRIVACY)..."
-  if "$YOUTUBE_UPLOAD_BIN" \
+  if YT_UPLOAD_PROGRESS_FD=3 "$YOUTUBE_UPLOAD_BIN" \
     --privacy="$YOUTUBE_UPLOAD_PRIVACY" \
     --title="$title" \
     --description="$YOUTUBE_UPLOAD_DESCRIPTION" \
@@ -567,14 +888,27 @@ run_upload_stage() {
 if { $run_concat || $run_audio || $run_video; }; then
   require_cmd "$FFMPEG"
 fi
-if $run_audio; then
+if $run_audio || $run_video; then
   require_cmd ffprobe
+fi
+if $run_video && ! "$FFMPEG" -hide_banner -h encoder=libx264 >/dev/null 2>&1; then
+  log_msg "Fehler: FFmpeg stellt den Encoder libx264 nicht bereit."
+  exit 1
 fi
 if $run_upload; then
   require_cmd "$YOUTUBE_UPLOAD_BIN"
 fi
 if [ "$NOTIFY" = true ]; then
   require_cmd notify-send
+fi
+if [ "$SHUTDOWN" = true ]; then
+  require_cmd systemctl
+  require_cmd flock
+  lock_shutdown_control
+  write_shutdown_control_file "$SHUTDOWN_CONTROL_FILE" "$$" enabled
+  SHUTDOWN_CONTROL_OWNED=true
+  unlock_shutdown_control
+  log_msg "Shutdown nach Abschluss aktiviert. Laufzeitsteuerung: ./process_videos.sh -S disable|enable|status $DATE"
 fi
 
 if $run_concat; then
@@ -625,8 +959,26 @@ fi
 cleanup_temp_files
 
 if [ "$SHUTDOWN" = true ]; then
-  log_msg "Prozess abgeschlossen, fahre System herunter..."
-  systemctl poweroff
+  if lock_shutdown_control; then
+    if read_shutdown_control_file "$SHUTDOWN_CONTROL_FILE" && [ "$SHUTDOWN_CONTROL_PID" = "$$" ]; then
+      if [ "$SHUTDOWN_CONTROL_STATE" = "enabled" ]; then
+        rm -f -- "$SHUTDOWN_CONTROL_FILE"
+        SHUTDOWN_CONTROL_OWNED=false
+        log_msg "Prozess abgeschlossen, fahre System herunter..."
+        systemctl --check-inhibitors=yes poweroff
+      else
+        log_msg "Shutdown wurde waehrend des Laufs deaktiviert; der Computer bleibt eingeschaltet."
+      fi
+    else
+      log_msg "Warnung: Shutdown-Steuerung fehlt oder ist ungueltig; der Computer bleibt sicherheitshalber eingeschaltet."
+    fi
+
+    rm -f -- "$SHUTDOWN_CONTROL_FILE"
+    SHUTDOWN_CONTROL_OWNED=false
+    unlock_shutdown_control
+  else
+    log_msg "Warnung: Shutdown-Steuerung konnte nicht gesperrt werden; der Computer bleibt sicherheitshalber eingeschaltet."
+  fi
 elif [ "$NOTIFY" = true ]; then
   notify-send "Verarbeitung abgeschlossen" "Die Schritte ($STAGES) fuer $DATE sind abgeschlossen."
 else
